@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 - Исправлены ошибки сборки под `x86_64-pc-windows-msvc`: включены фичи `raw-window-handle-06` для `slint` и `Win32_Security` для `windows-sys`, добавлен импорт `slint::ComponentHandle` в `src/core/mod.rs`.
+- `diagnostics.rs` и `torrents_view.slint`: если сторонний/уже запущенный TorrServer отвечает на порту `8090`, отсутствие `data/torrserver/TorrServer-windows-amd64.exe` больше не помечается как критическая ошибка и не показывает блокирующий баннер на вкладке «Раздачи».
+- `src/modules/torrserver/api.rs`: переработан разбор ответов `/search/?query=` и JacRed на базе `serde_json::Value` (поддержка полей `Link`/`Magnet`/`Hash`, `Title`/`Name`, `null`-значений), добавлена проверка `EnableRutorSearch` и резервные зеркала JacRed (`jacred.xyz`, `jacred.stream`, `jr.maxvol.pro`).
+- `src/modules/torrserver/player.rs`: расширен автопоиск видеоплееров (`LocalAppData`, `AppData`, `Scoop`, `Chocolatey`, 64-битный K-Lite и read-only чтение `App Paths` из реестра Windows с раскрытием `%VAR%`).
 - Подготовка к расширению модульной системы (поддержка внешнего каталога `./data/modules/`).
 
 ## [0.1.0] — 2026-11-26

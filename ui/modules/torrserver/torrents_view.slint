@@ -13,6 +13,7 @@ export component TorrentsView inherits Rectangle {
     in-out property <bool> engine-updating: false;
     in-out property <string> engine-update-status: "";
     in-out property <bool> is-remote-mode: false;
+    in-out property <bool> status-healthy: false;
 
     callback add-magnet(string);
     callback paste-and-add-magnet();
@@ -172,7 +173,7 @@ export component TorrentsView inherits Rectangle {
         }
 
         // Missing Engine Banner
-        if (root.engine-missing && !root.is-remote-mode) : Rectangle {
+        if (root.engine-missing && !root.is-remote-mode && !root.status-healthy) : Rectangle {
             border-radius: Theme.radius-card;
             background: Theme.info-bg;
             border-width: 1px;

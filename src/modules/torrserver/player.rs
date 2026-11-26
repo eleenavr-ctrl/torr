@@ -18,76 +18,197 @@ pub fn detect_installed_players() -> Vec<DetectedPlayer> {
     let pf86 = std::env::var("ProgramFiles(x86)")
         .unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
     let local_app = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let appdata = std::env::var("APPDATA").unwrap_or_default();
+    let user_profile = std::env::var("USERPROFILE").unwrap_or_default();
+    let choco_bin = std::env::var("ChocolateyInstall")
+        .map(|p| PathBuf::from(p).join("bin"))
+        .unwrap_or_else(|_| PathBuf::from("C:\\ProgramData\\chocolatey\\bin"));
 
-    let candidates: [(&str, &str, Vec<PathBuf>); 5] = [
+    let candidates: [(&str, &str, Vec<&str>, Vec<PathBuf>); 5] = [
         (
             "potplayer",
             "PotPlayer",
+            vec!["PotPlayerMini64.exe", "PotPlayerMini.exe"],
             vec![
                 PathBuf::from(&pf).join("DAUM\\PotPlayer\\PotPlayerMini64.exe"),
                 PathBuf::from(&pf86).join("DAUM\\PotPlayer\\PotPlayerMini.exe"),
-                PathBuf::from("C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe"),
+                PathBuf::from(&pf).join("PotPlayer\\PotPlayerMini64.exe"),
+                PathBuf::from(&local_app).join("PotPlayer\\PotPlayerMini64.exe"),
+                PathBuf::from(&local_app).join("Programs\\PotPlayer\\PotPlayerMini64.exe"),
+                PathBuf::from(&user_profile).join("scoop\\apps\\potplayer\\current\\PotPlayerMini64.exe"),
             ],
         ),
         (
             "mpv",
             "MPV",
+            vec!["mpv.exe", "mpvnet.exe"],
             vec![
                 PathBuf::from(&pf).join("mpv\\mpv.exe"),
                 PathBuf::from(&local_app).join("Programs\\mpv\\mpv.exe"),
+                PathBuf::from(&appdata).join("mpv\\mpv.exe"),
                 PathBuf::from(&pf).join("mpv.net\\mpvnet.exe"),
+                PathBuf::from(&local_app).join("Programs\\mpv.net\\mpvnet.exe"),
+                PathBuf::from(&user_profile).join("scoop\\apps\\mpv\\current\\mpv.exe"),
+                choco_bin.join("mpv.exe"),
             ],
         ),
         (
             "vlc",
             "VLC Media Player",
+            vec!["vlc.exe"],
             vec![
                 PathBuf::from(&pf).join("VideoLAN\\VLC\\vlc.exe"),
                 PathBuf::from(&pf86).join("VideoLAN\\VLC\\vlc.exe"),
+                PathBuf::from(&local_app).join("Programs\\VideoLAN\\VLC\\vlc.exe"),
+                PathBuf::from(&user_profile).join("scoop\\apps\\vlc\\current\\vlc.exe"),
             ],
         ),
         (
             "mpc-be",
             "MPC-BE",
+            vec!["mpc-be64.exe", "mpc-be.exe"],
             vec![
                 PathBuf::from(&pf).join("MPC-BE x64\\mpc-be64.exe"),
+                PathBuf::from(&pf).join("MPC-BE\\mpc-be64.exe"),
                 PathBuf::from(&pf86).join("MPC-BE\\mpc-be.exe"),
+                PathBuf::from(&local_app).join("Programs\\MPC-BE\\mpc-be64.exe"),
+                PathBuf::from(&user_profile).join("scoop\\apps\\mpc-be\\current\\mpc-be64.exe"),
             ],
         ),
         (
             "mpc-hc",
             "MPC-HC",
+            vec!["mpc-hc64.exe", "mpc-hc.exe"],
             vec![
                 PathBuf::from(&pf).join("MPC-HC\\mpc-hc64.exe"),
                 PathBuf::from(&pf86).join("MPC-HC\\mpc-hc.exe"),
+                PathBuf::from(&pf).join("K-Lite Codec Pack\\MPC-HC64\\mpc-hc64.exe"),
                 PathBuf::from(&pf86).join("K-Lite Codec Pack\\MPC-HC64\\mpc-hc64.exe"),
+                PathBuf::from(&pf86).join("K-Lite Codec Pack\\MPC-HC\\mpc-hc.exe"),
+                PathBuf::from(&local_app).join("Programs\\MPC-HC\\mpc-hc64.exe"),
+                PathBuf::from(&user_profile).join("scoop\\apps\\mpc-hc\\current\\mpc-hc64.exe"),
             ],
         ),
     ];
 
-    for (id, name, paths) in candidates {
-        if let Some(p) = paths.into_iter().find(|p| p.exists()) {
+    for (id, name, exe_names, paths) in candidates {
+        let resolved = paths
+            .into_iter()
+            .find(|p| p.exists())
+            .or_else(|| exe_names.iter().find_map(|exe| find_in_app_paths(exe)))
+            .or_else(|| exe_names.iter().find_map(|exe| find_in_path(exe)));
+
+        if let Some(p) = resolved {
             found.push(DetectedPlayer {
                 id: id.to_string(),
                 name: name.to_string(),
                 exe_path: p,
             });
-        } else if let Some(in_path) = find_in_path(match id {
-            "potplayer" => "PotPlayerMini64.exe",
-            "mpv" => "mpv.exe",
-            "vlc" => "vlc.exe",
-            "mpc-be" => "mpc-be64.exe",
-            _ => "mpc-hc64.exe",
-        }) {
-            found.push(DetectedPlayer {
-                id: id.to_string(),
-                name: name.to_string(),
-                exe_path: in_path,
-            });
         }
     }
 
     found
+}
+
+fn find_in_app_paths(exe_name: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Registry::{
+            RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER,
+            HKEY_LOCAL_MACHINE, KEY_READ, REG_EXPAND_SZ, REG_SZ,
+        };
+
+        let subkey_str = format!(
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}\0"
+        );
+        let subkey: Vec<u16> = subkey_str.encode_utf16().collect();
+
+        for root_key in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+            unsafe {
+                let mut hkey: HKEY = std::ptr::null_mut();
+                if RegOpenKeyExW(root_key, subkey.as_ptr(), 0, KEY_READ, &mut hkey) == 0 {
+                    let mut reg_type: u32 = 0;
+                    let mut byte_len: u32 = 0;
+                    if RegQueryValueExW(
+                        hkey,
+                        std::ptr::null(),
+                        std::ptr::null(),
+                        &mut reg_type,
+                        std::ptr::null_mut(),
+                        &mut byte_len,
+                    ) == 0
+                        && byte_len > 2
+                        && (reg_type == REG_SZ || reg_type == REG_EXPAND_SZ)
+                    {
+                        let mut buf = vec![0u16; (byte_len as usize / 2) + 1];
+                        if RegQueryValueExW(
+                            hkey,
+                            std::ptr::null(),
+                            std::ptr::null(),
+                            &mut reg_type,
+                            buf.as_mut_ptr() as *mut u8,
+                            &mut byte_len,
+                        ) == 0
+                        {
+                            let raw = String::from_utf16_lossy(&buf)
+                                .trim_end_matches('\0')
+                                .trim()
+                                .trim_matches('"')
+                                .to_string();
+                            if !raw.is_empty() {
+                                let expanded = expand_env_vars(&raw);
+                                let p = PathBuf::from(expanded);
+                                if p.exists() {
+                                    RegCloseKey(hkey);
+                                    return Some(p);
+                                }
+                            }
+                        }
+                    }
+                    RegCloseKey(hkey);
+                }
+            }
+        }
+        None
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = exe_name;
+        None
+    }
+}
+
+#[allow(dead_code)]
+fn expand_env_vars(input: &str) -> String {
+    if !input.contains('%') {
+        return input.to_string();
+    }
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after_start = &rest[start + 1..];
+        if let Some(end) = after_start.find('%') {
+            let var_name = &after_start[..end];
+            if !var_name.is_empty() {
+                if let Ok(val) = std::env::var(var_name) {
+                    out.push_str(&val);
+                } else {
+                    out.push('%');
+                    out.push_str(var_name);
+                    out.push('%');
+                }
+            }
+            rest = &after_start[end + 1..];
+        } else {
+            out.push('%');
+            rest = after_start;
+            break;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn find_in_path(exe_name: &str) -> Option<PathBuf> {

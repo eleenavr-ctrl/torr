@@ -111,34 +111,6 @@ pub struct ApiSearchResult {
     pub tracker: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-struct RawRutorResult {
-    #[serde(alias = "Title")]
-    title: String,
-    #[serde(alias = "Magnet")]
-    magnet: String,
-    #[serde(alias = "Size")]
-    size: String,
-    #[serde(alias = "Seed")]
-    seed: i32,
-    #[serde(alias = "Peer")]
-    peer: i32,
-    #[serde(alias = "Tracker")]
-    tracker: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-struct RawJacRedResult {
-    title: String,
-    magnet: String,
-    size: u64,
-    sid: i32,
-    pir: i32,
-    tracker: String,
-}
-
 pub struct TorrServerApi {
     base_url: String,
     username: String,
@@ -353,81 +325,148 @@ impl TorrServerApi {
     pub fn search(&self, query: &str) -> Result<Vec<ApiSearchResult>, String> {
         let encoded = urlencoding::encode(query.trim());
 
-        // 1. Built-in TorrServer RuTor search
-        let ts_search_url = format!("{}/search?query={}", self.base_url, encoded);
-        if let Ok(resp) = self.auth(self.client.get(&ts_search_url)).send() {
-            if resp.status().is_success() {
-                if let Ok(items) = resp.json::<Vec<RawRutorResult>>() {
-                    if !items.is_empty() {
-                        diagnostics::info(
-                            "[TS:API]",
-                            format!("Поиск TorrServer RuTor вернул {} результатов", items.len()),
-                        );
-                        return Ok(items
-                            .into_iter()
-                            .filter(|i| !i.magnet.is_empty())
-                            .map(|i| {
-                                let quality = detect_quality(&i.title);
-                                let size_bytes = parse_size_bytes(&i.size);
-                                ApiSearchResult {
-                                    title: i.title,
-                                    magnet: i.magnet,
-                                    size_text: if i.size.is_empty() { "—".into() } else { i.size },
-                                    size_bytes,
-                                    seeds: i.seed,
-                                    peers: i.peer,
-                                    quality,
-                                    tracker: if i.tracker.is_empty() {
-                                        "RuTor".to_string()
-                                    } else {
-                                        i.tracker
-                                    },
+        // 1. Built-in TorrServer RuTor search (/search/?query=...)
+        let mut rutor_note = String::new();
+        let ts_search_url = format!("{}/search/?query={}", self.base_url, encoded);
+        match self.auth(self.client.get(&ts_search_url)).send() {
+            Ok(resp) if resp.status().is_success() => {
+                let raw_text = resp.text().unwrap_or_default();
+                let trimmed = raw_text.trim();
+                if trimmed.is_empty() || trimmed == "null" || trimmed == "[]" {
+                    let rutor_disabled = self
+                        .get_settings()
+                        .map(|s| !s.enable_rutor_search)
+                        .unwrap_or(false);
+                    rutor_note = if rutor_disabled {
+                        "встроенный поиск RuTor отключён в настройках TorrServer".to_string()
+                    } else {
+                        "RuTor вернул 0 результатов".to_string()
+                    };
+                } else {
+                    match serde_json::from_str::<Value>(trimmed) {
+                        Ok(val) => {
+                            let arr_opt = val.as_array().cloned().or_else(|| {
+                                val.get("results")
+                                    .or_else(|| val.get("data"))
+                                    .and_then(|v| v.as_array())
+                                    .cloned()
+                            });
+                            if let Some(items) = arr_opt {
+                                let mapped: Vec<ApiSearchResult> =
+                                    items.iter().filter_map(parse_rutor_value).collect();
+                                if !mapped.is_empty() {
+                                    diagnostics::info(
+                                        "[TS:API]",
+                                        format!(
+                                            "Поиск TorrServer RuTor вернул {} результатов",
+                                            mapped.len()
+                                        ),
+                                    );
+                                    return Ok(mapped);
                                 }
-                            })
-                            .collect());
+                                let rutor_disabled = self
+                                    .get_settings()
+                                    .map(|s| !s.enable_rutor_search)
+                                    .unwrap_or(false);
+                                rutor_note = if rutor_disabled {
+                                    "встроенный поиск RuTor отключён в настройках TorrServer"
+                                        .to_string()
+                                } else {
+                                    "RuTor вернул 0 подходящих раздач".to_string()
+                                };
+                            } else {
+                                rutor_note = "RuTor вернул неожиданный формат JSON".to_string();
+                            }
+                        }
+                        Err(e) => {
+                            rutor_note = format!("RuTor JSON: {e}");
+                        }
                     }
+                }
+            }
+            Ok(resp) => {
+                let code = resp.status().as_u16();
+                let body = resp.text().unwrap_or_default();
+                let body_trim = body.trim();
+                let rutor_disabled = self
+                    .get_settings()
+                    .map(|s| !s.enable_rutor_search)
+                    .unwrap_or(false);
+                if rutor_disabled {
+                    rutor_note =
+                        format!("RuTor отключён в настройках TorrServer (HTTP {code})");
+                } else if body_trim.is_empty() {
+                    rutor_note = format!("RuTor HTTP {code}");
+                } else {
+                    rutor_note = format!("RuTor HTTP {code} ({body_trim})");
+                }
+            }
+            Err(e) => {
+                rutor_note = format!("RuTor недоступен: {e}");
+            }
+        }
+
+        // 2. Fallback to public JacRed mirrors
+        diagnostics::info(
+            "[TS:API]",
+            format!("{rutor_note} — выполняется fallback-поиск JacRed"),
+        );
+
+        let mirrors = [
+            "https://jacred.xyz",
+            "https://jacred.stream",
+            "https://jr.maxvol.pro",
+        ];
+        let mut last_err = String::new();
+
+        for base in mirrors {
+            let jacred_url = format!("{base}/api/v1.0/torrents?search={encoded}");
+            match self
+                .client
+                .get(&jacred_url)
+                .header("User-Agent", "TorrServerUI/0.1.0")
+                .send()
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    let raw_text = resp.text().unwrap_or_default();
+                    let trimmed = raw_text.trim();
+                    if trimmed.is_empty() || trimmed == "null" || trimmed == "[]" {
+                        last_err = format!("{base}: пустой ответ");
+                        continue;
+                    }
+                    match serde_json::from_str::<Vec<Value>>(trimmed) {
+                        Ok(items) => {
+                            let mapped: Vec<ApiSearchResult> =
+                                items.iter().filter_map(parse_jacred_value).collect();
+                            if !mapped.is_empty() {
+                                diagnostics::info(
+                                    "[TS:API]",
+                                    format!(
+                                        "JacRed ({base}) вернул {} результатов",
+                                        mapped.len()
+                                    ),
+                                );
+                                return Ok(mapped);
+                            }
+                            last_err = format!("{base}: 0 результатов");
+                        }
+                        Err(e) => {
+                            last_err = format!("{base}: ошибка JSON ({e})");
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    last_err = format!("{base}: HTTP {}", resp.status().as_u16());
+                }
+                Err(e) => {
+                    last_err = format!("{base}: {e}");
                 }
             }
         }
 
-        // 2. Fallback to public JacRed API
-        diagnostics::info("[TS:API]", "RuTor пуст или отключён — выполняется fallback-поиск JacRed");
-        let jacred_url = format!("https://jacred.xyz/api/v1.0/torrents?search={}", encoded);
-        let resp = self
-            .client
-            .get(&jacred_url)
-            .header("User-Agent", "TorrServerUI/0.1.0")
-            .send()
-            .map_err(|e| format!("Ошибка поиска (RuTor и JacRed недоступны): {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("JacRed вернул HTTP {}", resp.status().as_u16()));
-        }
-
-        let items = resp
-            .json::<Vec<RawJacRedResult>>()
-            .map_err(|e| format!("Ошибка разбора ответа JacRed: {e}"))?;
-
-        Ok(items
-            .into_iter()
-            .filter(|i| !i.magnet.is_empty())
-            .map(|i| {
-                let quality = detect_quality(&i.title);
-                ApiSearchResult {
-                    title: i.title,
-                    magnet: i.magnet,
-                    size_text: format_bytes(i.size),
-                    size_bytes: i.size as f64,
-                    seeds: i.sid,
-                    peers: i.pir,
-                    quality,
-                    tracker: if i.tracker.is_empty() {
-                        "JacRed".to_string()
-                    } else {
-                        i.tracker
-                    },
-                }
-            })
-            .collect())
+        Err(format!(
+            "Поиск не дал результатов ({rutor_note}; JacRed: {last_err}). Включите «Встроенный поиск RuTor» в Настройках и нажмите «Применить параметры движка (/settings)»."
+        ))
     }
 
     pub fn stream_url(&self, hash: &str, file_id: i32, file_name: &str) -> String {
@@ -503,13 +542,142 @@ fn detect_quality(title: &str) -> String {
     tags.join(" ")
 }
 
+fn first_non_empty_str(v: &Value, keys: &[&str]) -> String {
+    for k in keys {
+        if let Some(s) = v.get(*k).and_then(|x| x.as_str()) {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn first_i32(v: &Value, keys: &[&str]) -> i32 {
+    for k in keys {
+        if let Some(val) = v.get(*k) {
+            if let Some(n) = val.as_i64() {
+                return n as i32;
+            }
+            if let Some(s) = val.as_str() {
+                if let Ok(n) = s.trim().parse::<i32>() {
+                    return n;
+                }
+            }
+        }
+    }
+    0
+}
+
+fn parse_rutor_value(v: &Value) -> Option<ApiSearchResult> {
+    let title = first_non_empty_str(v, &["Title", "title", "Name", "name"]);
+    let magnet_direct = first_non_empty_str(v, &["Magnet", "magnet"]);
+    let link = first_non_empty_str(v, &["Link", "link"]);
+    let hash = first_non_empty_str(v, &["Hash", "hash"]);
+
+    let magnet = if !magnet_direct.is_empty() {
+        magnet_direct
+    } else if link.starts_with("magnet:") {
+        link
+    } else if !hash.is_empty() {
+        format!("magnet:?xt=urn:btih:{hash}")
+    } else if !link.is_empty() {
+        link
+    } else {
+        return None;
+    };
+
+    let (size_text, size_bytes) = match v.get("Size").or_else(|| v.get("size")) {
+        Some(Value::Number(n)) => {
+            let b = n.as_u64().unwrap_or(0);
+            (format_bytes(b), b as f64)
+        }
+        Some(Value::String(s)) => {
+            let t = s.trim().to_string();
+            let b = parse_size_bytes(&t);
+            (if t.is_empty() { "—".to_string() } else { t }, b)
+        }
+        _ => ("—".to_string(), 0.0),
+    };
+
+    let seeds = first_i32(v, &["Seed", "Seeds", "seed", "seeds", "sid"]);
+    let peers = first_i32(v, &["Peer", "Peers", "peer", "peers", "pir"]);
+    let tracker = {
+        let t = first_non_empty_str(v, &["Tracker", "tracker"]);
+        if t.is_empty() {
+            "RuTor".to_string()
+        } else {
+            t
+        }
+    };
+    let disp_title = if title.is_empty() {
+        magnet.clone()
+    } else {
+        title
+    };
+    let quality = detect_quality(&disp_title);
+
+    Some(ApiSearchResult {
+        title: disp_title,
+        magnet,
+        size_text,
+        size_bytes,
+        seeds,
+        peers,
+        quality,
+        tracker,
+    })
+}
+
+fn parse_jacred_value(v: &Value) -> Option<ApiSearchResult> {
+    let magnet = first_non_empty_str(v, &["magnet", "Magnet"]);
+    if magnet.is_empty() {
+        return None;
+    }
+    let title = first_non_empty_str(v, &["title", "Title", "name", "Name"]);
+    let size_u64 = v
+        .get("size")
+        .or_else(|| v.get("Size"))
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
+    let seeds = first_i32(v, &["sid", "Seed", "seeds"]);
+    let peers = first_i32(v, &["pir", "Peer", "peers"]);
+    let tracker = {
+        let t = first_non_empty_str(v, &["tracker", "Tracker"]);
+        if t.is_empty() {
+            "JacRed".to_string()
+        } else {
+            t
+        }
+    };
+    let disp_title = if title.is_empty() {
+        magnet.clone()
+    } else {
+        title
+    };
+    let quality = detect_quality(&disp_title);
+
+    Some(ApiSearchResult {
+        title: disp_title,
+        magnet,
+        size_text: format_bytes(size_u64),
+        size_bytes: size_u64 as f64,
+        seeds,
+        peers,
+        quality,
+        tracker,
+    })
+}
+
 fn parse_size_bytes(size_str: &str) -> f64 {
     let normalized = size_str.replace(',', ".").to_lowercase();
-    let num: f64 = normalized
-        .split_whitespace()
-        .next()
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
+    let num_str: String = normalized
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let num: f64 = num_str.parse::<f64>().unwrap_or(0.0);
     if normalized.contains("gb") || normalized.contains("гб") {
         num * 1024.0 * 1024.0 * 1024.0
     } else if normalized.contains("mb") || normalized.contains("мб") {

@@ -185,7 +185,27 @@ pub fn run_diagnostics(
         && !Path::new(ts_cfg.player_custom_path.trim()).exists();
 
     // 5. Human-readable problem diagnosis
-    let (has_problem, problem_hint) = if ts_cfg.mode == 0 && !binary_exists {
+    let (has_problem, problem_hint) = if api_ok {
+        if custom_player_missing {
+            (
+                true,
+                format!(
+                    "Сервер работает, но не найден выбранный видеоплеер: {}",
+                    ts_cfg.player_custom_path
+                ),
+            )
+        } else if ts_cfg.mode == 0 && !binary_exists {
+            (
+                false,
+                format!(
+                    "Подключено к уже запущенному TorrServer ({engine_version}, порт {}). Для автозапуска оболочкой можно скачать движок в data/torrserver/.",
+                    ts_cfg.port
+                ),
+            )
+        } else {
+            (false, "Всё работает штатно".to_string())
+        }
+    } else if ts_cfg.mode == 0 && !binary_exists {
         (
             true,
             "Файл движка не найден в data/torrserver/. Нажмите «Скачать движок» на вкладке Раздачи или в Настройках."
@@ -199,7 +219,7 @@ pub fn run_diagnostics(
                 ts_cfg.player_custom_path
             ),
         )
-    } else if !api_ok && ts_cfg.mode == 0 && port_status.contains("занят") {
+    } else if ts_cfg.mode == 0 && port_status.contains("занят") {
         (
             true,
             format!(
@@ -207,12 +227,12 @@ pub fn run_diagnostics(
                 ts_cfg.port
             ),
         )
-    } else if !api_ok && api_timeout {
+    } else if api_timeout {
         (
             true,
             "Таймаут подключения к серверу. Проверьте фаервол или статус движка.".to_string(),
         )
-    } else if !api_ok {
+    } else {
         (
             true,
             if ts_cfg.mode == 0 {
@@ -222,8 +242,6 @@ pub fn run_diagnostics(
                 format!("Нет связи с удалённым TorrServer ({base_url}). Проверьте URL, логин и пароль.")
             },
         )
-    } else {
-        (false, "Всё работает штатно".to_string())
     };
 
     DiagnosticsReport {
