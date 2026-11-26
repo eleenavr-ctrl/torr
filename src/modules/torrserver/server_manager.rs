@@ -12,13 +12,17 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
 struct GitHubRelease {
     tag_name: String,
+    prerelease: bool,
+    draft: bool,
     assets: Vec<GitHubAsset>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
@@ -75,9 +79,9 @@ impl ServerManager {
 
         let mut cmd = Command::new(&self.paths.torrserver_exe);
         if use_yaml_mode {
-            diagnostics::info(
+            diagnostics::warn(
                 "[TS:ENGINE]",
-                "Обнаружен TorrServer нового формата (-c config.yaml): запуск в data/torrserver/",
+                "Обнаружен TorrServer Silo (-c config.yaml) с изменённым REST API (/echo -> 404). Нажмите «Обновить с GitHub» для установки совместимого MatriX.",
             );
             let cfg_yaml = self.paths.torrserver_dir.join("config.yaml");
             if cfg_yaml.exists() {
@@ -181,8 +185,8 @@ impl ServerManager {
     where
         F: Fn(&str, f32),
     {
-        on_progress("Стадия 1/4: запрос последнего релиза YouROK/TorrServer...", 0.02);
-        diagnostics::info("[TS:UPDATER]", "Проверка релизов YouROK/TorrServer на GitHub");
+        on_progress("Стадия 1/4: поиск совместимого релиза MatriX на GitHub...", 0.02);
+        diagnostics::info("[TS:UPDATER]", "Поиск актуального релиза MatriX в YouROK/TorrServer");
 
         let api_client = Client::builder()
             .connect_timeout(Duration::from_secs(15))
@@ -197,44 +201,34 @@ impl ServerManager {
             .map_err(|e| format!("Ошибка HTTP-клиента загрузки: {e}"))?;
 
         let (tag_name, download_url) = match api_client
-            .get("https://api.github.com/repos/YouROK/TorrServer/releases/latest")
+            .get("https://api.github.com/repos/YouROK/TorrServer/releases?per_page=25")
             .header("User-Agent", "TorrServerUI/0.1.0")
             .send()
             .and_then(|r| r.error_for_status())
-            .and_then(|r| r.json::<GitHubRelease>())
+            .and_then(|r| r.json::<Vec<GitHubRelease>>())
         {
-            Ok(release) => {
-                if let Some(asset) = release
-                    .assets
-                    .iter()
-                    .find(|a| a.name.eq_ignore_ascii_case("TorrServer-windows-amd64.exe"))
-                    .or_else(|| {
-                        release.assets.iter().find(|a| {
-                            let low = a.name.to_lowercase();
-                            low.contains("windows") && low.contains("amd64") && low.ends_with(".exe")
-                        })
-                    })
-                {
-                    (release.tag_name, asset.browser_download_url.clone())
+            Ok(releases) => {
+                if let Some((tag, url)) = select_compatible_matrix_release(&releases) {
+                    (tag, url)
                 } else {
                     diagnostics::warn(
                         "[TS:UPDATER]",
-                        "Ассет TorrServer-windows-amd64.exe не найден в API — переход на прямую ссылку релиза",
+                        "Релиз MatriX не найден в списке API — пробуем MatriX.141 / MatriX.135 напрямую",
                     );
                     (
-                        release.tag_name,
-                        "https://github.com/YouROK/TorrServer/releases/latest/download/TorrServer-windows-amd64.exe".to_string(),
+                        "MatriX.141".to_string(),
+                        "https://github.com/YouROK/TorrServer/releases/download/MatriX.141/TorrServer-windows-amd64.exe".to_string(),
                     )
                 }
             }
             Err(e) => {
                 diagnostics::warn(
                     "[TS:UPDATER]",
-                    format!("GitHub API недоступен ({}) — пробуем прямую ссылку latest/download", format_error_chain(&e)),
+                    format!("GitHub API недоступен ({}) — пробуем прямую ссылку MatriX.141", format_error_chain(&e)),
                 );
                 (
-                    "latest".to_string(),
-                    "https://github.com/YouROK/TorrServer/releases/latest/download/TorrServer-windows-amd64.exe".to_string(),
+                    "MatriX.141".to_string(),
+                    "https://github.com/YouROK/TorrServer/releases/download/MatriX.141/TorrServer-windows-amd64.exe".to_string(),
                 )
             }
         };
@@ -449,6 +443,38 @@ where
         0.95,
     );
     Ok(())
+}
+
+fn select_compatible_matrix_release(releases: &[GitHubRelease]) -> Option<(String, String)> {
+    let find_in = |allow_prerelease: bool| -> Option<(String, String)> {
+        for r in releases {
+            if r.draft || (!allow_prerelease && r.prerelease) {
+                continue;
+            }
+            if !r.tag_name.to_lowercase().starts_with("matrix") {
+                continue;
+            }
+            if let Some(asset) = r
+                .assets
+                .iter()
+                .find(|a| a.name.eq_ignore_ascii_case("TorrServer-windows-amd64.exe"))
+                .or_else(|| {
+                    r.assets.iter().find(|a| {
+                        let low = a.name.to_lowercase();
+                        low.contains("windows")
+                            && low.contains("amd64")
+                            && low.ends_with(".exe")
+                            && !low.contains("gst")
+                    })
+                })
+            {
+                return Some((r.tag_name.clone(), asset.browser_download_url.clone()));
+            }
+        }
+        None
+    };
+
+    find_in(false).or_else(|| find_in(true))
 }
 
 fn detect_yaml_config_mode(exe_path: &Path) -> bool {

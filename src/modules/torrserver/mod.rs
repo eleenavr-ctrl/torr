@@ -1458,10 +1458,12 @@ fn refresh_torrents_and_status(shared: &Arc<TorrServerShared>) {
                 }
             }
         }
-        Err(_) => {
+        Err(e) => {
             status.healthy = false;
             status.state_label = if cfg.mode == 0 && !shared.server.binary_exists() {
                 "Движок не установлен".to_string()
+            } else if e.contains("HTTP 404") {
+                "Несовместимый движок Silo (нужен MatriX)".to_string()
             } else {
                 "Нет связи с TorrServer".to_string()
             };

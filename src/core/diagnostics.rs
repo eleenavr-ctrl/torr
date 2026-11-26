@@ -128,6 +128,7 @@ pub fn run_diagnostics(
     let mut api_ping = "—".to_string();
     let mut api_ok = false;
     let mut api_timeout = false;
+    let mut api_silo_incompatible = false;
 
     if let Ok(cli) = client {
         let echo_url = format!("{base_url}/echo");
@@ -149,7 +150,17 @@ pub fn run_diagnostics(
                 api_ok = true;
             }
             Ok(resp) => {
-                engine_version = format!("HTTP {}", resp.status().as_u16());
+                let code = resp.status().as_u16();
+                engine_version = format!("HTTP {code}");
+                if code == 404 {
+                    if let Ok(root_resp) = cli.get(&base_url).send() {
+                        let body = root_resp.text().unwrap_or_default().to_lowercase();
+                        if body.contains("silo") || body.contains("torrserver") {
+                            api_silo_incompatible = true;
+                            engine_version = "TorrServer Silo (несовместимый API)".to_string();
+                        }
+                    }
+                }
             }
             Err(e) => {
                 if e.is_timeout() {
@@ -163,6 +174,8 @@ pub fn run_diagnostics(
     let port_status = if ts_cfg.mode == 1 {
         if api_ok {
             format!("Удалённый сервер активен ({base_url})")
+        } else if api_silo_incompatible {
+            format!("Удалённый сервер Silo несовместим ({base_url})")
         } else {
             format!("Удалённый сервер недоступен ({base_url})")
         }
@@ -171,6 +184,8 @@ pub fn run_diagnostics(
         let addr: SocketAddr = ([127, 0, 0, 1], port).into();
         if api_ok {
             format!("Порт {port}: активен (TorrServer)")
+        } else if api_silo_incompatible {
+            format!("Порт {port}: запущен TorrServer Silo (API /echo 404)")
         } else if TcpStream::connect_timeout(&addr, Duration::from_millis(250)).is_ok() {
             format!("Порт {port}: занят сторонним процессом")
         } else if TcpListener::bind(addr).is_ok() {
@@ -218,6 +233,12 @@ pub fn run_diagnostics(
                 "Не найден выбранный видеоплеер: {}",
                 ts_cfg.player_custom_path
             ),
+        )
+    } else if api_silo_incompatible {
+        (
+            true,
+            "Запущен TorrServer Silo (новый API без /echo). Нажмите «Обновить с GitHub» в Настройках для установки совместимой версии MatriX."
+                .to_string(),
         )
     } else if ts_cfg.mode == 0 && port_status.contains("занят") {
         (
