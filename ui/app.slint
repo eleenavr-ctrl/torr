@@ -125,6 +125,8 @@ export component AppWindow inherits Window {
     callback play-all-m3u(string);
     callback copy-stream-url(string, int);
     callback toggle-only-video(bool);
+    callback export-torrents();
+    callback import-torrents();
 
     callback search-torrents(string);
     callback set-search-quality(string);
@@ -290,6 +292,8 @@ export component AppWindow inherits Window {
                     copy-stream-url(h, fid) => { root.copy-stream-url(h, fid); }
                     toggle-only-video(v) => { root.toggle-only-video(v); }
                     download-update-engine => { root.download-update-engine(); }
+                    export-torrents => { root.export-torrents(); }
+                    import-torrents => { root.import-torrents(); }
                 }
 
                 if (root.active-tab == 1) : SearchView {

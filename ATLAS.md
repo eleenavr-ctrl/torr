@@ -41,7 +41,7 @@
 | --- | --- | --- | --- |
 | Навигация и тема | `active-tab`, `theme-mode`, `autostart-enabled`, `app-icon` | `change-theme-mode`, `toggle-autostart`, `open-diagnostics-tab` | `src/main.rs`, `src/core/mod.rs` |
 | Статус-бар | `status-healthy`, `status-text`, `status-version`, `status-speed`, `status-active-count` | `open-diagnostics-tab` | `src/modules/torrserver/mod.rs` |
-| Раздачи | `torrents`, `selected-files`, `magnet-input`, `only-video-files`, `engine-missing` | `add-magnet`, `paste-and-add-magnet`, `pick-torrent-file`, `select-torrent`, `play-file`, `play-all-m3u`, `drop-torrent`, `remove-torrent` | `src/modules/torrserver/mod.rs` |
+| Раздачи | `torrents`, `selected-files`, `magnet-input`, `only-video-files`, `engine-missing`, `status-healthy` | `add-magnet`, `paste-and-add-magnet`, `pick-torrent-file`, `select-torrent`, `play-file`, `play-all-m3u`, `drop-torrent`, `remove-torrent`, `export-torrents`, `import-torrents` | `src/modules/torrserver/mod.rs` |
 | Поиск | `search-query`, `search-quality-filter`, `search-sort-mode`, `search-results` | `search-torrents`, `set-search-quality`, `set-search-sort`, `add-search-result`, `play-search-result` | `src/modules/torrserver/mod.rs` |
 | История | `history-items`, `history-only-favorites` | `toggle-history-favorites`, `play-history-item`, `toggle-history-favorite`, `remove-history-item` | `src/modules/torrserver/mod.rs` |
 | Настройки TS | `ts-mode`, `ts-port`, `ts-remote-url`, `ts-cache-size-mb`, `player-presets`, `clipboard-watch` | `save-ts-connection-settings`, `restart-ts-engine`, `download-update-engine`, `save-ts-cache-settings`, `detect-players`, `pick-player-exe`, `save-player-settings` | `src/modules/torrserver/mod.rs` |

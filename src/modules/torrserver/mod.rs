@@ -7,7 +7,7 @@ use crate::core;
 use crate::core::diagnostics;
 use crate::core::storage::{save_config, AppConfig, PortablePaths, TorrServerConfig};
 use crate::modules::torrserver::api::{
-    format_bytes, format_speed, ApiSearchResult, ApiTorrent, TorrServerApi,
+    format_bytes, format_speed, parse_backup_json, ApiSearchResult, ApiTorrent, TorrServerApi,
     TorrServerEngineSettings,
 };
 use crate::modules::torrserver::clipboard::ClipboardWatcher;
@@ -417,6 +417,122 @@ impl AppModule for TorrServerModule {
             ui.on_toggle_only_video(move |only| {
                 shared.update_ts_config(|c| c.only_video_files = only);
                 push_torrents_to_ui(&shared);
+            });
+        }
+
+        // 12a. Export torrents to .json backup
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_export_torrents(move || {
+                let s = Arc::clone(&shared);
+                thread::spawn(move || {
+                    let api = TorrServerApi::from_config(&s.ts_config());
+                    match api.export_torrents_json() {
+                        Ok((_, 0)) => {
+                            s.toast("Список раздач пуст — нечего экспортировать");
+                        }
+                        Ok((json, count)) => {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_file_name("torrents_backup.json")
+                                .add_filter("JSON бэкап TorrServer", &["json"])
+                                .save_file()
+                            {
+                                match std::fs::write(&path, json) {
+                                    Ok(_) => {
+                                        diagnostics::info(
+                                            "[TS:API]",
+                                            format!(
+                                                "Экспортировано раздач ({count}) в {}",
+                                                path.display()
+                                            ),
+                                        );
+                                        s.toast(format!("Экспортировано раздач: {count}"));
+                                    }
+                                    Err(e) => {
+                                        let msg = format!("Ошибка сохранения файла: {e}");
+                                        diagnostics::error("[TS:API]", msg.clone());
+                                        s.toast(msg);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            diagnostics::error("[TS:API]", e.clone());
+                            s.toast(e);
+                        }
+                    }
+                });
+            });
+        }
+
+        // 12b. Import torrents from .json backup
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_import_torrents(move || {
+                let s = Arc::clone(&shared);
+                thread::spawn(move || {
+                    let Some(path) = rfd::FileDialog::new()
+                        .add_filter("JSON бэкап TorrServer", &["json"])
+                        .pick_file()
+                    else {
+                        return;
+                    };
+
+                    let raw = match std::fs::read_to_string(&path) {
+                        Ok(txt) => txt,
+                        Err(e) => {
+                            let msg = format!("Ошибка чтения файла: {e}");
+                            diagnostics::error("[TS:API]", msg.clone());
+                            s.toast(msg);
+                            return;
+                        }
+                    };
+
+                    let items = match parse_backup_json(&raw) {
+                        Ok(list) => list,
+                        Err(e) => {
+                            diagnostics::error("[TS:API]", e.clone());
+                            s.toast(e);
+                            return;
+                        }
+                    };
+
+                    let total = items.len();
+                    s.toast(format!("Импорт раздач: {total}..."));
+                    let api = TorrServerApi::from_config(&s.ts_config());
+                    let mut ok_count = 0usize;
+                    let mut err_count = 0usize;
+
+                    for item in &items {
+                        match api.add_backup_item(item) {
+                            Ok(_) => ok_count += 1,
+                            Err(e) => {
+                                err_count += 1;
+                                diagnostics::warn(
+                                    "[TS:API]",
+                                    format!("Не удалось импортировать '{}': {e}", item.title),
+                                );
+                            }
+                        }
+                    }
+
+                    diagnostics::info(
+                        "[TS:API]",
+                        format!(
+                            "Импорт из {} завершён: добавлено {ok_count}, ошибок {err_count}",
+                            path.display()
+                        ),
+                    );
+                    refresh_torrents_and_status(&s);
+
+                    if err_count == 0 {
+                        s.toast(format!("Импортировано раздач: {ok_count}"));
+                    } else {
+                        s.toast(format!(
+                            "Импортировано: {ok_count}, ошибок: {err_count}"
+                        ));
+                    }
+                });
             });
         }
 

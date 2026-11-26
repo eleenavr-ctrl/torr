@@ -28,6 +28,8 @@ export component TorrentsView inherits Rectangle {
     callback copy-stream-url(string, int);
     callback toggle-only-video(bool);
     callback download-update-engine();
+    callback export-torrents();
+    callback import-torrents();
 
     property <length> ctx-x: 0px;
     property <length> ctx-y: 0px;
@@ -165,6 +167,14 @@ export component TorrentsView inherits Rectangle {
             HorizontalLayout {
                 alignment: center;
                 spacing: 8px;
+                FluentButton {
+                    text: "⬇  Экспорт .json";
+                    clicked => { root.export-torrents(); }
+                }
+                FluentButton {
+                    text: "⬆  Импорт .json";
+                    clicked => { root.import-torrents(); }
+                }
                 FluentButton {
                     text: "↻  Обновить";
                     clicked => { root.refresh-torrents(); }

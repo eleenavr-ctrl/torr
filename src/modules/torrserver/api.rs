@@ -33,6 +33,7 @@ pub struct ApiTorrent {
     pub active_peers: i32,
     pub stat: i32,
     pub stat_string: String,
+    pub poster: String,
     pub file_stats: Vec<ApiFileStat>,
     pub data: String,
 }
@@ -109,6 +110,16 @@ pub struct ApiSearchResult {
     pub peers: i32,
     pub quality: String,
     pub tracker: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct TorrentBackupItem {
+    pub hash: String,
+    pub title: String,
+    pub poster: String,
+    pub data: String,
+    pub magnet: String,
 }
 
 pub struct TorrServerApi {
@@ -191,6 +202,63 @@ impl TorrServerApi {
         }
         resp.json::<ApiTorrent>()
             .map_err(|e| format!("Ошибка ответа при добавлении magnet: {e}"))
+    }
+
+    pub fn add_backup_item(&self, item: &TorrentBackupItem) -> Result<ApiTorrent, String> {
+        let link = if !item.magnet.trim().is_empty() {
+            item.magnet.trim().to_string()
+        } else if !item.hash.trim().is_empty() {
+            format!("magnet:?xt=urn:btih:{}", item.hash.trim())
+        } else {
+            return Err("Элемент бэкапа не содержит magnet или hash".to_string());
+        };
+
+        let mut obj = serde_json::Map::new();
+        obj.insert("action".to_string(), json!("add"));
+        obj.insert("link".to_string(), json!(link));
+        obj.insert("title".to_string(), json!(item.title));
+        obj.insert("save_to_db".to_string(), json!(true));
+        if !item.poster.trim().is_empty() {
+            obj.insert("poster".to_string(), json!(item.poster));
+        }
+        if !item.data.trim().is_empty() {
+            obj.insert("data".to_string(), json!(item.data));
+        }
+
+        let url = format!("{}/torrents", self.base_url);
+        let resp = self
+            .auth(self.client.post(&url))
+            .json(&Value::Object(obj))
+            .send()
+            .map_err(|e| format!("Ошибка импорта раздачи: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {} при импорте раздачи", resp.status().as_u16()));
+        }
+        resp.json::<ApiTorrent>()
+            .map_err(|e| format!("Ошибка ответа при импорте раздачи: {e}"))
+    }
+
+    pub fn export_torrents_json(&self) -> Result<(String, usize), String> {
+        let list = self.list_torrents()?;
+        let items: Vec<TorrentBackupItem> = list
+            .into_iter()
+            .filter(|t| !t.hash.trim().is_empty())
+            .map(|t| TorrentBackupItem {
+                magnet: format!("magnet:?xt=urn:btih:{}", t.hash.trim()),
+                hash: t.hash,
+                title: if !t.title.trim().is_empty() {
+                    t.title
+                } else {
+                    t.name
+                },
+                poster: t.poster,
+                data: t.data,
+            })
+            .collect();
+        let count = items.len();
+        let json = serde_json::to_string_pretty(&items)
+            .map_err(|e| format!("Ошибка сериализации JSON: {e}"))?;
+        Ok((json, count))
     }
 
     pub fn get_torrent(&self, hash: &str) -> Result<ApiTorrent, String> {
@@ -687,4 +755,67 @@ fn parse_size_bytes(size_str: &str) -> f64 {
     } else {
         num
     }
+}
+
+pub fn parse_backup_json(raw: &str) -> Result<Vec<TorrentBackupItem>, String> {
+    let cleaned = raw.trim_start_matches('\u{feff}').trim();
+    if cleaned.is_empty() {
+        return Err("Файл импорта пуст".to_string());
+    }
+
+    let val: Value =
+        serde_json::from_str(cleaned).map_err(|e| format!("Некорректный JSON-файл: {e}"))?;
+
+    let items_slice: Vec<Value> = if let Some(arr) = val.as_array() {
+        arr.clone()
+    } else if let Some(arr) = val
+        .get("torrents")
+        .or_else(|| val.get("Torrents"))
+        .or_else(|| val.get("items"))
+        .and_then(|v| v.as_array())
+    {
+        arr.clone()
+    } else if val.is_object() {
+        vec![val]
+    } else {
+        return Err("Ожидался JSON-массив раздач".to_string());
+    };
+
+    let mut out = Vec::new();
+    for item in items_slice {
+        match item {
+            Value::String(s) => {
+                let link = s.trim().to_string();
+                if !link.is_empty() {
+                    out.push(TorrentBackupItem {
+                        magnet: link,
+                        ..Default::default()
+                    });
+                }
+            }
+            Value::Object(_) => {
+                let hash = first_non_empty_str(&item, &["hash", "Hash"]);
+                let magnet = first_non_empty_str(&item, &["magnet", "Magnet", "link", "Link"]);
+                if hash.is_empty() && magnet.is_empty() {
+                    continue;
+                }
+                let title = first_non_empty_str(&item, &["title", "Title", "name", "Name"]);
+                let poster = first_non_empty_str(&item, &["poster", "Poster"]);
+                let data = first_non_empty_str(&item, &["data", "Data"]);
+                out.push(TorrentBackupItem {
+                    hash,
+                    title,
+                    poster,
+                    data,
+                    magnet,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    if out.is_empty() {
+        return Err("В JSON-файле не найдено ни одной раздачи (hash/magnet)".to_string());
+    }
+    Ok(out)
 }
