@@ -777,13 +777,14 @@ impl AppModule for TorrServerModule {
             ui.on_download_update_engine(move || {
                 if let Some(app) = weak.upgrade() {
                     app.set_engine_updating(true);
-                    app.set_engine_update_status("Подготовка к загрузке...".into());
+                    app.set_engine_update_progress(0.0);
+                    app.set_engine_update_status("Стадия 1/4: подготовка к загрузке...".into());
                 }
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
                     let cfg = s.ts_config();
                     let s_cb = Arc::clone(&s);
-                    let res = s.server.update_from_github(&cfg, move |status_msg| {
+                    let res = s.server.update_from_github(&cfg, move |status_msg, prog| {
                         let msg = status_msg.to_string();
                         if let Ok(guard) = s_cb.ui_weak.lock() {
                             if let Some(w) = guard.as_ref() {
@@ -791,6 +792,7 @@ impl AppModule for TorrServerModule {
                                 let _ = slint::invoke_from_event_loop(move || {
                                     if let Some(app) = w_c.upgrade() {
                                         app.set_engine_update_status(msg.into());
+                                        app.set_engine_update_progress(prog);
                                     }
                                 });
                             }
@@ -814,6 +816,7 @@ impl AppModule for TorrServerModule {
                                 if let Some(app) = w_c.upgrade() {
                                     app.set_engine_updating(false);
                                     app.set_engine_missing(!final_exists);
+                                    app.set_engine_update_progress(if ok { 1.0 } else { 0.0 });
                                     app.set_engine_update_status(msg.clone().into());
                                     core::show_toast(&app, msg);
                                 }

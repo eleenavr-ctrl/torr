@@ -12,6 +12,7 @@ export component TorrentsView inherits Rectangle {
     in-out property <bool> engine-missing: false;
     in-out property <bool> engine-updating: false;
     in-out property <string> engine-update-status: "";
+    in-out property <float> engine-update-progress: 0.0;
     in-out property <bool> is-remote-mode: false;
     in-out property <bool> status-healthy: false;
 
@@ -209,15 +210,28 @@ export component TorrentsView inherits Rectangle {
                             : "Нажмите кнопку справа, чтобы автоматически скачать последний релиз YouROK/TorrServer с GitHub.";
                         font-family: Theme.font-ui;
                         font-size: 12px;
-                        color: Theme.text-secondary;
+                        color: root.engine-updating ? Theme.accent : Theme.text-secondary;
                         wrap: word-wrap;
+                    }
+                    if (root.engine-updating) : Rectangle {
+                        height: 6px;
+                        border-radius: 3px;
+                        background: Theme.border-color;
+                        Rectangle {
+                            x: 0px;
+                            y: 0px;
+                            height: 6px;
+                            border-radius: 3px;
+                            width: parent.width * clamp(root.engine-update-progress, 0.0, 1.0);
+                            background: Theme.accent;
+                        }
                     }
                 }
                 HorizontalLayout {
                     alignment: center;
                     spacing: 8px;
                     FluentButton {
-                        text: root.engine-updating ? "Скачивание..." : "⬇  Скачать движок";
+                        text: root.engine-updating ? "Загрузка..." : "⬇  Скачать движок";
                         primary: true;
                         enabled: !root.engine-updating;
                         clicked => { root.download-update-engine(); }

@@ -1,6 +1,6 @@
 use crate::core::diagnostics;
 use crate::core::storage::{PortablePaths, TorrServerConfig};
-use crate::modules::torrserver::api::TorrServerApi;
+use crate::modules::torrserver::api::{format_speed, TorrServerApi};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::error::Error as StdError;
@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
@@ -161,12 +161,12 @@ impl ServerManager {
     pub fn update_from_github<F>(
         &self,
         cfg: &TorrServerConfig,
-        on_status: F,
+        on_progress: F,
     ) -> Result<String, String>
     where
-        F: Fn(&str),
+        F: Fn(&str, f32),
     {
-        on_status("Запрос последнего релиза YouROK/TorrServer...");
+        on_progress("Стадия 1/4: запрос последнего релиза YouROK/TorrServer...", 0.02);
         diagnostics::info("[TS:UPDATER]", "Проверка релизов YouROK/TorrServer на GitHub");
 
         let api_client = Client::builder()
@@ -229,20 +229,23 @@ impl ServerManager {
         let mut last_err = String::new();
 
         for attempt in 1..=max_attempts {
-            on_status(&format!(
-                "Скачивание TorrServer ({tag_name}){}",
-                if attempt > 1 {
-                    format!(" — попытка {attempt}/{max_attempts}...")
-                } else {
-                    "...".to_string()
-                }
-            ));
+            on_progress(
+                &format!(
+                    "Стадия 2/4: подключение к CDN для {tag_name}{}...",
+                    if attempt > 1 {
+                        format!(" (попытка {attempt}/{max_attempts})")
+                    } else {
+                        String::new()
+                    }
+                ),
+                0.04,
+            );
             diagnostics::info(
                 "[TS:UPDATER]",
                 format!("Скачивание ({tag_name}, попытка {attempt}/{max_attempts}): {download_url}"),
             );
 
-            match stream_download_exe(&dl_client, &download_url, &new_path, &tag_name, &on_status) {
+            match stream_download_exe(&dl_client, &download_url, &new_path, &tag_name, &on_progress) {
                 Ok(_) => {
                     last_err.clear();
                     break;
@@ -255,6 +258,12 @@ impl ServerManager {
                         format!("Попытка {attempt}/{max_attempts} не удалась: {last_err}"),
                     );
                     if attempt < max_attempts {
+                        on_progress(
+                            &format!(
+                                "Стадия 2/4: повтор подключения ({attempt}/{max_attempts})..."
+                            ),
+                            0.04,
+                        );
                         thread::sleep(Duration::from_millis(900));
                     }
                 }
@@ -265,7 +274,7 @@ impl ServerManager {
             return Err(last_err);
         }
 
-        on_status("Остановка текущего процесса и замена файла...");
+        on_progress("Стадия 3/4: остановка процесса и установка .exe...", 0.96);
         self.stop(cfg);
         thread::sleep(Duration::from_millis(350));
 
@@ -283,10 +292,11 @@ impl ServerManager {
         );
 
         if cfg.mode == 0 {
-            on_status("Запуск обновлённого TorrServer...");
+            on_progress("Стадия 4/4: запуск TorrServer...", 0.99);
             self.start(cfg)?;
         }
 
+        on_progress(&format!("Готово: установлен TorrServer {tag_name}"), 1.0);
         Ok(tag_name)
     }
 
@@ -321,10 +331,10 @@ fn stream_download_exe<F>(
     url: &str,
     dest_path: &Path,
     tag_name: &str,
-    on_status: &F,
+    on_progress: &F,
 ) -> Result<(), String>
 where
-    F: Fn(&str),
+    F: Fn(&str, f32),
 {
     let mut resp = client
         .get(url)
@@ -341,7 +351,10 @@ where
     let mut buf = [0u8; 65536];
     let mut total: u64 = 0;
     let mut header_checked = false;
-    let mut last_reported_mb: u64 = 0;
+    let start_time = Instant::now();
+    let mut last_tick = Instant::now();
+    let mut bytes_since_tick: u64 = 0;
+    let mut smooth_bps: f64 = 0.0;
 
     loop {
         let n = resp
@@ -359,20 +372,38 @@ where
         file.write_all(&buf[..n])
             .map_err(|e| format!("Ошибка записи .new файла: {e}"))?;
         total += n as u64;
+        bytes_since_tick += n as u64;
 
-        let cur_mb = total / (1024 * 1024);
-        if cur_mb > last_reported_mb {
-            last_reported_mb = cur_mb;
+        let dt = last_tick.elapsed().as_secs_f64();
+        if dt >= 0.25 {
+            let inst_bps = bytes_since_tick as f64 / dt;
+            smooth_bps = if smooth_bps <= 0.0 {
+                inst_bps
+            } else {
+                smooth_bps * 0.65 + inst_bps * 0.35
+            };
+            last_tick = Instant::now();
+            bytes_since_tick = 0;
+
+            let speed_txt = format_speed(smooth_bps);
             let mb_done = total as f64 / (1024.0 * 1024.0);
             if let Some(exp) = expected_len.filter(|&v| v > 0) {
+                let ratio = (total as f64 / exp as f64).clamp(0.0, 1.0) as f32;
+                let pct = (ratio * 100.0).round() as u32;
                 let mb_total = exp as f64 / (1024.0 * 1024.0);
-                on_status(&format!(
-                    "Скачивание TorrServer ({tag_name}): {mb_done:.1} / {mb_total:.1} МБ"
-                ));
+                on_progress(
+                    &format!(
+                        "Стадия 2/4: скачивание {tag_name} — {pct}% ({mb_done:.1} / {mb_total:.1} МБ) • {speed_txt}"
+                    ),
+                    ratio,
+                );
             } else {
-                on_status(&format!(
-                    "Скачивание TorrServer ({tag_name}): {mb_done:.1} МБ"
-                ));
+                on_progress(
+                    &format!(
+                        "Стадия 2/4: скачивание {tag_name} — {mb_done:.1} МБ • {speed_txt}"
+                    ),
+                    0.5,
+                );
             }
         }
     }
@@ -392,6 +423,16 @@ where
             ));
         }
     }
+
+    let avg_bps = total as f64 / start_time.elapsed().as_secs_f64().max(0.05);
+    let mb_total = total as f64 / (1024.0 * 1024.0);
+    on_progress(
+        &format!(
+            "Стадия 2/4: скачано 100% ({mb_total:.1} МБ) • ср. скорость {}",
+            format_speed(avg_bps)
+        ),
+        0.95,
+    );
     Ok(())
 }
 

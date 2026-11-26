@@ -58,6 +58,7 @@ export component AppWindow inherits Window {
     in-out property <bool> engine-missing: false;
     in-out property <bool> engine-updating: false;
     in-out property <string> engine-update-status: "";
+    in-out property <float> engine-update-progress: 0.0;
     in-out property <bool> is-remote-mode: false;
 
     // Search View
@@ -289,6 +290,7 @@ export component AppWindow inherits Window {
                     engine-missing: root.engine-missing;
                     engine-updating: root.engine-updating;
                     engine-update-status: root.engine-update-status;
+                    engine-update-progress: root.engine-update-progress;
                     is-remote-mode: root.is-remote-mode;
                     status-healthy: root.status-healthy;
 
@@ -371,6 +373,7 @@ export component AppWindow inherits Window {
                             ts-engine-version-text: root.ts-engine-version-text;
                             engine-updating: root.engine-updating;
                             engine-update-status: root.engine-update-status;
+                            engine-update-progress: root.engine-update-progress;
 
                             ts-cache-size-mb <=> root.ts-cache-size-mb;
                             ts-preload-percent <=> root.ts-preload-percent;
