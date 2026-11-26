@@ -487,6 +487,16 @@ impl AppModule for TorrServerModule {
             ui.on_import_torrents(move || {
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
+                    let api = TorrServerApi::from_config(&s.ts_config());
+                    if let Err(e) = api.echo() {
+                        let msg = format!(
+                            "TorrServer не запущен ({e}). Сначала скачайте или запустите движок."
+                        );
+                        diagnostics::warn("[TS:API]", msg.clone());
+                        s.toast(msg);
+                        return;
+                    }
+
                     let Some(path) = rfd::FileDialog::new()
                         .add_filter("JSON бэкап TorrServer", &["json"])
                         .pick_file()
@@ -793,7 +803,11 @@ impl AppModule for TorrServerModule {
                             let w_c = w.clone();
                             let msg = match &res {
                                 Ok(tag) => format!("Установлен TorrServer {tag}"),
-                                Err(e) => format!("Ошибка обновления: {e}"),
+                                Err(e) => {
+                                    let err_txt = format!("Ошибка обновления: {e}");
+                                    diagnostics::error("[TS:UPDATER]", err_txt.clone());
+                                    err_txt
+                                }
                             };
                             let ok = res.is_ok();
                             let _ = slint::invoke_from_event_loop(move || {
@@ -808,6 +822,51 @@ impl AppModule for TorrServerModule {
                                 thread::sleep(Duration::from_millis(600));
                                 refresh_torrents_and_status(&s);
                             }
+                        }
+                    }
+                });
+            });
+        }
+
+        // 19a. Pick local TorrServer .exe manually
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_pick_engine_exe(move || {
+                let s = Arc::clone(&shared);
+                thread::spawn(move || {
+                    let Some(path) = rfd::FileDialog::new()
+                        .add_filter("TorrServer (.exe)", &["exe"])
+                        .pick_file()
+                    else {
+                        return;
+                    };
+                    let cfg = s.ts_config();
+                    match s.server.install_local_exe(&cfg, &path) {
+                        Ok(_) => {
+                            let final_exists = s.server.binary_exists();
+                            if let Ok(guard) = s.ui_weak.lock() {
+                                if let Some(w) = guard.as_ref() {
+                                    let w_c = w.clone();
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(app) = w_c.upgrade() {
+                                            app.set_engine_missing(!final_exists);
+                                            app.set_engine_update_status(
+                                                "Локальный движок установлен и запущен".into(),
+                                            );
+                                            core::show_toast(
+                                                &app,
+                                                "Движок TorrServer установлен и запущен",
+                                            );
+                                        }
+                                    });
+                                }
+                            }
+                            thread::sleep(Duration::from_millis(600));
+                            refresh_torrents_and_status(&s);
+                        }
+                        Err(e) => {
+                            diagnostics::error("[TS:ENGINE]", e.clone());
+                            s.toast(e);
                         }
                     }
                 });

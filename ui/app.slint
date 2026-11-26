@@ -153,6 +153,7 @@ export component AppWindow inherits Window {
     callback save-ts-connection-settings();
     callback restart-ts-engine();
     callback download-update-engine();
+    callback pick-engine-exe();
     callback open-web-panel();
     callback save-ts-cache-settings();
     callback detect-players();
@@ -304,6 +305,7 @@ export component AppWindow inherits Window {
                     copy-stream-url(h, fid) => { root.copy-stream-url(h, fid); }
                     toggle-only-video(v) => { root.toggle-only-video(v); }
                     download-update-engine => { root.download-update-engine(); }
+                    pick-engine-exe => { root.pick-engine-exe(); }
                     export-torrents => { root.export-torrents(); }
                     import-torrents => { root.import-torrents(); }
                 }
@@ -398,6 +400,7 @@ export component AppWindow inherits Window {
                             save-ts-connection-settings => { root.save-ts-connection-settings(); }
                             restart-ts-engine => { root.restart-ts-engine(); }
                             download-update-engine => { root.download-update-engine(); }
+                            pick-engine-exe => { root.pick-engine-exe(); }
                             open-web-panel => { root.open-web-panel(); }
                             save-ts-cache-settings => { root.save-ts-cache-settings(); }
                             detect-players => { root.detect-players(); }

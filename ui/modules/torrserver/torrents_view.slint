@@ -28,6 +28,7 @@ export component TorrentsView inherits Rectangle {
     callback copy-stream-url(string, int);
     callback toggle-only-video(bool);
     callback download-update-engine();
+    callback pick-engine-exe();
     callback export-torrents();
     callback import-torrents();
 
@@ -212,13 +213,19 @@ export component TorrentsView inherits Rectangle {
                         wrap: word-wrap;
                     }
                 }
-                VerticalLayout {
+                HorizontalLayout {
                     alignment: center;
+                    spacing: 8px;
                     FluentButton {
                         text: root.engine-updating ? "Скачивание..." : "⬇  Скачать движок";
                         primary: true;
                         enabled: !root.engine-updating;
                         clicked => { root.download-update-engine(); }
+                    }
+                    FluentButton {
+                        text: "Указать .exe...";
+                        enabled: !root.engine-updating;
+                        clicked => { root.pick-engine-exe(); }
                     }
                 }
             }

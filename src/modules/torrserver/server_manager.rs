@@ -5,6 +5,7 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -172,35 +173,57 @@ impl ServerManager {
             .build()
             .map_err(|e| format!("Ошибка HTTP-клиента: {e}"))?;
 
-        let release = client
+        let (tag_name, download_url) = match client
             .get("https://api.github.com/repos/YouROK/TorrServer/releases/latest")
             .header("User-Agent", "TorrServerUI/0.1.0")
             .send()
-            .map_err(|e| format!("Не удалось подключиться к GitHub API: {e}"))?
-            .error_for_status()
-            .map_err(|e| format!("Ошибка ответа GitHub API: {e}"))?
-            .json::<GitHubRelease>()
-            .map_err(|e| format!("Ошибка разбора JSON релиза: {e}"))?;
+            .and_then(|r| r.error_for_status())
+            .and_then(|r| r.json::<GitHubRelease>())
+        {
+            Ok(release) => {
+                if let Some(asset) = release
+                    .assets
+                    .iter()
+                    .find(|a| a.name.eq_ignore_ascii_case("TorrServer-windows-amd64.exe"))
+                    .or_else(|| {
+                        release.assets.iter().find(|a| {
+                            let low = a.name.to_lowercase();
+                            low.contains("windows") && low.contains("amd64") && low.ends_with(".exe")
+                        })
+                    })
+                {
+                    (release.tag_name, asset.browser_download_url.clone())
+                } else {
+                    diagnostics::warn(
+                        "[TS:UPDATER]",
+                        "Ассет TorrServer-windows-amd64.exe не найден в API — переход на прямую ссылку релиза",
+                    );
+                    (
+                        release.tag_name,
+                        "https://github.com/YouROK/TorrServer/releases/latest/download/TorrServer-windows-amd64.exe".to_string(),
+                    )
+                }
+            }
+            Err(e) => {
+                diagnostics::warn(
+                    "[TS:UPDATER]",
+                    format!("GitHub API недоступен ({e}) — пробуем прямую ссылку latest/download"),
+                );
+                (
+                    "latest".to_string(),
+                    "https://github.com/YouROK/TorrServer/releases/latest/download/TorrServer-windows-amd64.exe".to_string(),
+                )
+            }
+        };
 
-        let asset = release
-            .assets
-            .iter()
-            .find(|a| a.name.eq_ignore_ascii_case("TorrServer-windows-amd64.exe"))
-            .ok_or_else(|| {
-                "В последнем релизе не найден файл TorrServer-windows-amd64.exe".to_string()
-            })?;
-
-        on_status(&format!(
-            "Скачивание {} ({})...",
-            asset.name, release.tag_name
-        ));
+        on_status(&format!("Скачивание TorrServer ({tag_name})..."));
         diagnostics::info(
             "[TS:UPDATER]",
-            format!("Скачивание {} ({})", release.tag_name, asset.browser_download_url),
+            format!("Скачивание ({tag_name}): {download_url}"),
         );
 
         let resp = client
-            .get(&asset.browser_download_url)
+            .get(&download_url)
             .header("User-Agent", "TorrServerUI/0.1.0")
             .send()
             .map_err(|e| format!("Ошибка скачивания бинарника: {e}"))?
@@ -211,6 +234,13 @@ impl ServerManager {
         let bytes = resp
             .bytes()
             .map_err(|e| format!("Ошибка чтения потока файла: {e}"))?;
+
+        if bytes.len() < 1024 * 1024 || !bytes.starts_with(b"MZ") {
+            return Err(format!(
+                "Скачанный файл не является корректным Windows .exe ({} байт)",
+                bytes.len()
+            ));
+        }
 
         {
             let mut file = fs::File::create(&new_path)
@@ -233,7 +263,7 @@ impl ServerManager {
 
         diagnostics::info(
             "[TS:UPDATER]",
-            format!("Движок обновлён до версии {}", release.tag_name),
+            format!("Движок обновлён до версии {tag_name}"),
         );
 
         if cfg.mode == 0 {
@@ -241,6 +271,31 @@ impl ServerManager {
             self.start(cfg)?;
         }
 
-        Ok(release.tag_name)
+        Ok(tag_name)
+    }
+
+    pub fn install_local_exe(
+        &self,
+        cfg: &TorrServerConfig,
+        source_path: &Path,
+    ) -> Result<(), String> {
+        if !source_path.exists() {
+            return Err(format!("Файл не найден: {}", source_path.display()));
+        }
+        self.stop(cfg);
+        thread::sleep(Duration::from_millis(300));
+
+        if source_path != self.paths.torrserver_exe {
+            fs::copy(source_path, &self.paths.torrserver_exe)
+                .map_err(|e| format!("Не удалось скопировать движок в data/torrserver/: {e}"))?;
+        }
+        diagnostics::info(
+            "[TS:ENGINE]",
+            format!("Установлен локальный бинарник из {}", source_path.display()),
+        );
+        if cfg.mode == 0 {
+            self.start(cfg)?;
+        }
+        Ok(())
     }
 }

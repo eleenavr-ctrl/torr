@@ -24,15 +24,17 @@ pub fn detect_installed_players() -> Vec<DetectedPlayer> {
         .map(|p| PathBuf::from(p).join("bin"))
         .unwrap_or_else(|_| PathBuf::from("C:\\ProgramData\\chocolatey\\bin"));
 
-    let candidates: [(&str, &str, Vec<&str>, Vec<PathBuf>); 5] = [
+    let candidates: Vec<(&str, &str, Vec<&str>, Vec<PathBuf>)> = vec![
         (
             "potplayer",
             "PotPlayer",
-            vec!["PotPlayerMini64.exe", "PotPlayerMini.exe"],
+            vec!["PotPlayerMini64.exe", "PotPlayerMini.exe", "PotPlayer64.exe", "PotPlayer.exe"],
             vec![
                 PathBuf::from(&pf).join("DAUM\\PotPlayer\\PotPlayerMini64.exe"),
+                PathBuf::from(&pf).join("DAUM\\PotPlayer\\PotPlayer64.exe"),
                 PathBuf::from(&pf86).join("DAUM\\PotPlayer\\PotPlayerMini.exe"),
                 PathBuf::from(&pf).join("PotPlayer\\PotPlayerMini64.exe"),
+                PathBuf::from(&pf).join("PotPlayer\\PotPlayer64.exe"),
                 PathBuf::from(&local_app).join("PotPlayer\\PotPlayerMini64.exe"),
                 PathBuf::from(&local_app).join("Programs\\PotPlayer\\PotPlayerMini64.exe"),
                 PathBuf::from(&user_profile).join("scoop\\apps\\potplayer\\current\\PotPlayerMini64.exe"),
@@ -48,6 +50,7 @@ pub fn detect_installed_players() -> Vec<DetectedPlayer> {
                 PathBuf::from(&appdata).join("mpv\\mpv.exe"),
                 PathBuf::from(&pf).join("mpv.net\\mpvnet.exe"),
                 PathBuf::from(&local_app).join("Programs\\mpv.net\\mpvnet.exe"),
+                PathBuf::from(&local_app).join("Microsoft\\WindowsApps\\mpv.exe"),
                 PathBuf::from(&user_profile).join("scoop\\apps\\mpv\\current\\mpv.exe"),
                 choco_bin.join("mpv.exe"),
             ],
@@ -60,6 +63,7 @@ pub fn detect_installed_players() -> Vec<DetectedPlayer> {
                 PathBuf::from(&pf).join("VideoLAN\\VLC\\vlc.exe"),
                 PathBuf::from(&pf86).join("VideoLAN\\VLC\\vlc.exe"),
                 PathBuf::from(&local_app).join("Programs\\VideoLAN\\VLC\\vlc.exe"),
+                PathBuf::from(&local_app).join("Microsoft\\WindowsApps\\vlc.exe"),
                 PathBuf::from(&user_profile).join("scoop\\apps\\vlc\\current\\vlc.exe"),
             ],
         ),
@@ -87,6 +91,25 @@ pub fn detect_installed_players() -> Vec<DetectedPlayer> {
                 PathBuf::from(&pf86).join("K-Lite Codec Pack\\MPC-HC\\mpc-hc.exe"),
                 PathBuf::from(&local_app).join("Programs\\MPC-HC\\mpc-hc64.exe"),
                 PathBuf::from(&user_profile).join("scoop\\apps\\mpc-hc\\current\\mpc-hc64.exe"),
+            ],
+        ),
+        (
+            "kmplayer",
+            "KMPlayer",
+            vec!["KMPlayer64.exe", "KMPlayer.exe"],
+            vec![
+                PathBuf::from(&pf).join("KMPlayer 64X\\KMPlayer64.exe"),
+                PathBuf::from(&pf86).join("The KMPlayer\\KMPlayer.exe"),
+                PathBuf::from("C:\\KMPlayer\\KMPlayer.exe"),
+            ],
+        ),
+        (
+            "smplayer",
+            "SMPlayer",
+            vec!["smplayer.exe"],
+            vec![
+                PathBuf::from(&pf).join("SMPlayer\\smplayer.exe"),
+                PathBuf::from(&pf86).join("SMPlayer\\smplayer.exe"),
             ],
         ),
     ];

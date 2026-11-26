@@ -46,6 +46,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     callback save-ts-connection-settings();
     callback restart-ts-engine();
     callback download-update-engine();
+    callback pick-engine-exe();
     callback open-web-panel();
     callback save-ts-cache-settings();
     callback detect-players();
@@ -164,6 +165,11 @@ export component TorrServerSettingsSection inherits VerticalLayout {
                 text: root.engine-updating ? "Обновление..." : "⬇  Обновить с GitHub";
                 enabled: !root.engine-updating;
                 clicked => { root.download-update-engine(); }
+            }
+            FluentButton {
+                text: "Указать .exe...";
+                enabled: !root.engine-updating;
+                clicked => { root.pick-engine-exe(); }
             }
             FluentButton {
                 text: "🌐  Веб-панель";
