@@ -3,11 +3,13 @@ use crate::core::storage::TorrServerConfig;
 use crate::modules::torrserver::api::{
     detect_quality, format_bytes, parse_size_bytes, ApiSearchResult,
 };
+use crate::modules::torrserver::rutracker_webview::RuTrackerWebView;
 use encoding_rs::WINDOWS_1251;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE};
 use reqwest::Proxy;
 use std::error::Error as StdError;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -24,19 +26,30 @@ struct CachedSession {
 
 pub struct RuTrackerClient {
     session: Mutex<Option<CachedSession>>,
-}
-
-impl Default for RuTrackerClient {
-    fn default() -> Self {
-        Self::new()
-    }
+    webview: RuTrackerWebView,
 }
 
 impl RuTrackerClient {
-    pub fn new() -> Self {
+    pub fn new(webview_dir: PathBuf) -> Self {
         Self {
             session: Mutex::new(None),
+            webview: RuTrackerWebView::new(webview_dir),
         }
+    }
+
+    pub fn shutdown(&self) {
+        self.webview.shutdown();
+    }
+
+    pub fn open_webview_login<F>(
+        &self,
+        cfg: &TorrServerConfig,
+        on_status: F,
+    ) -> Result<(), String>
+    where
+        F: Fn(String) + Send + Sync + 'static,
+    {
+        self.webview.open_login_window(cfg, on_status)
     }
 
     pub fn invalidate(&self) {
@@ -46,6 +59,9 @@ impl RuTrackerClient {
     }
 
     pub fn verify_login(&self, cfg: &TorrServerConfig) -> Result<String, String> {
+        if cfg.rutracker_use_webview {
+            return self.webview.verify_login(cfg);
+        }
         self.invalidate();
         if !cfg.has_rutracker_credentials() {
             return Err("Укажите логин и пароль RuTracker (или cookie bb_session)".to_string());
@@ -72,6 +88,9 @@ impl RuTrackerClient {
     }
 
     pub fn search(&self, cfg: &TorrServerConfig, query: &str) -> Result<Vec<ApiSearchResult>, String> {
+        if cfg.rutracker_use_webview {
+            return self.webview.search(cfg, query);
+        }
         if !cfg.has_rutracker_credentials() {
             return Err(
                 "RuTracker не настроен: укажите логин и пароль в Настройках".to_string(),
@@ -111,6 +130,9 @@ impl RuTrackerClient {
         cfg: &TorrServerConfig,
         topic_id: &str,
     ) -> Result<RuTrackerPayload, String> {
+        if cfg.rutracker_use_webview {
+            return self.webview.fetch_torrent_or_magnet(cfg, topic_id);
+        }
         let base = cfg.effective_rutracker_mirror();
         let dl_url = format!("{base}/forum/dl.php?t={topic_id}");
         let topic_url = format!("{base}/forum/viewtopic.php?t={topic_id}");
@@ -374,7 +396,7 @@ fn decode_cp1251(bytes: &[u8]) -> String {
     cow.into_owned()
 }
 
-fn encode_cp1251_query(input: &str) -> String {
+pub(crate) fn encode_cp1251_query(input: &str) -> String {
     let (cow, _, _) = WINDOWS_1251.encode(input);
     let mut out = String::with_capacity(cow.len() * 3);
     for &b in cow.as_ref() {
@@ -392,14 +414,14 @@ fn encode_cp1251_query(input: &str) -> String {
     out
 }
 
-fn looks_like_login_page(html: &str) -> bool {
+pub(crate) fn looks_like_login_page(html: &str) -> bool {
     let low = html.to_lowercase();
     low.contains("name=\"login_username\"")
         || low.contains("name='login_username'")
         || (low.contains("login.php") && low.contains("login_password"))
 }
 
-fn parse_tracker_html(html: &str) -> Vec<ApiSearchResult> {
+pub(crate) fn parse_tracker_html(html: &str) -> Vec<ApiSearchResult> {
     let mut results = Vec::new();
 
     // Narrow down to tor-tbl if present
@@ -542,7 +564,7 @@ fn extract_class_int(row_html: &str, class_name: &str) -> Option<i32> {
     digits.parse::<i32>().ok()
 }
 
-fn extract_magnet_from_html(html: &str) -> Option<String> {
+pub(crate) fn extract_magnet_from_html(html: &str) -> Option<String> {
     let pos = html.find("magnet:?xt=")?;
     let rest = &html[pos..];
     let end = rest

@@ -2,6 +2,7 @@ pub mod api;
 pub mod clipboard;
 pub mod player;
 pub mod rutracker;
+pub mod rutracker_webview;
 pub mod server_manager;
 
 use crate::core;
@@ -89,6 +90,7 @@ impl TorrServerModule {
         let history = load_history(&paths.ts_history_path);
         let players = detect_installed_players();
         let server = ServerManager::new(paths.clone());
+        let rutracker = RuTrackerClient::new(paths.ts_webview_dir.clone());
 
         let shared = Arc::new(TorrServerShared {
             paths,
@@ -103,7 +105,7 @@ impl TorrServerModule {
             search_quality: Mutex::new("ALL".to_string()),
             search_sort: Mutex::new(0),
             search_source: Mutex::new(0),
-            rutracker: RuTrackerClient::new(),
+            rutracker,
             detected_players: Mutex::new(players),
             history: Mutex::new(history),
             last_status: Mutex::new(ModuleStatus::default()),
@@ -212,6 +214,7 @@ impl AppModule for TorrServerModule {
         ui.set_clipboard_watch(cfg.clipboard_watch);
 
         ui.set_rt_enabled(cfg.rutracker_enabled);
+        ui.set_rt_use_webview(cfg.rutracker_use_webview);
         ui.set_rt_mirror(cfg.rutracker_mirror.clone().into());
         ui.set_rt_username(cfg.rutracker_username.clone().into());
         ui.set_rt_password(cfg.rutracker_password.clone().into());
@@ -219,7 +222,14 @@ impl AppModule for TorrServerModule {
         ui.set_rt_cookie(cfg.rutracker_cookie.clone().into());
         ui.set_rt_user_agent(cfg.rutracker_user_agent.clone().into());
         if cfg.rutracker_enabled && cfg.has_rutracker_credentials() {
-            ui.set_rt_auth_status("Учётные данные сохранены".into());
+            ui.set_rt_auth_status(
+                if cfg.rutracker_use_webview {
+                    "Активен режим встроенного браузера (WebView2)"
+                } else {
+                    "Учётные данные сохранены"
+                }
+                .into(),
+            );
         }
 
         sync_players_to_ui(&self.shared, ui);
@@ -1020,6 +1030,7 @@ impl AppModule for TorrServerModule {
             ui.on_save_and_test_rutracker(move || {
                 if let Some(app) = weak.upgrade() {
                     let enabled = app.get_rt_enabled();
+                    let use_webview = app.get_rt_use_webview();
                     let mirror = app.get_rt_mirror().trim().to_string();
                     let username = app.get_rt_username().trim().to_string();
                     let password = app.get_rt_password().to_string();
@@ -1029,6 +1040,7 @@ impl AppModule for TorrServerModule {
 
                     shared.update_ts_config(|c| {
                         c.rutracker_enabled = enabled;
+                        c.rutracker_use_webview = use_webview;
                         c.rutracker_mirror = if mirror.is_empty() {
                             "https://rutracker.org".to_string()
                         } else {
@@ -1075,6 +1087,60 @@ impl AppModule for TorrServerModule {
                 }
             });
         }
+
+        // 26. Open RuTracker WebView2 Login / Cloudflare Window
+        {
+            let shared = Arc::clone(&self.shared);
+            let weak = ui.as_weak();
+            ui.on_open_rutracker_webview(move || {
+                if let Some(app) = weak.upgrade() {
+                    let mirror = app.get_rt_mirror().trim().to_string();
+                    let proxy = app.get_rt_proxy().trim().to_string();
+                    let user_agent = app.get_rt_user_agent().replace(['\r', '\n'], " ").trim().to_string();
+
+                    app.set_rt_enabled(true);
+                    app.set_rt_use_webview(true);
+                    app.set_rt_auth_status("Открытие окна встроенного браузера WebView2...".into());
+
+                    shared.update_ts_config(|c| {
+                        c.rutracker_enabled = true;
+                        c.rutracker_use_webview = true;
+                        c.rutracker_mirror = if mirror.is_empty() {
+                            "https://rutracker.org".to_string()
+                        } else {
+                            mirror
+                        };
+                        c.rutracker_proxy = proxy;
+                        c.rutracker_user_agent = user_agent;
+                    });
+
+                    let s = Arc::clone(&shared);
+                    let w_outer = weak.clone();
+                    thread::spawn(move || {
+                        let cfg = s.ts_config();
+                        let w_cb = w_outer.clone();
+                        let res = s.rutracker.open_webview_login(&cfg, move |status_msg| {
+                            let w_inner = w_cb.clone();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(app) = w_inner.upgrade() {
+                                    app.set_rt_auth_status(status_msg.clone().into());
+                                    core::show_toast(&app, status_msg);
+                                }
+                            });
+                        });
+                        if let Err(e) = res {
+                            diagnostics::error("[TS:RUTRACKER]", e.clone());
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(app) = w_outer.upgrade() {
+                                    app.set_rt_auth_status(e.clone().into());
+                                    core::show_toast(&app, e);
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        }
     }
 
     fn on_window_visibility_changed(&self, visible: bool) {
@@ -1094,6 +1160,7 @@ impl AppModule for TorrServerModule {
 
     fn on_shutdown(&mut self) {
         self.shared.poll_stop.store(true, Ordering::Relaxed);
+        self.shared.rutracker.shutdown();
         if let Ok(mut guard) = self.shared.clipboard.lock() {
             if let Some(watcher) = guard.take() {
                 watcher.stop();

@@ -1,10 +1,10 @@
 # ATLAS.md — Карта репозитория и связей
 
-## 1. Структура файлов (31 файл)
+## 1. Структура файлов (32 файла)
 
 | Путь | Назначение |
 | --- | --- |
-| `Cargo.toml` | Манифест пакета, зависимости (Slint 1.9, reqwest+rustls, tray-icon, windows-sys 0.59) |
+| `Cargo.toml` | Манифест пакета, зависимости (Slint 1.9, reqwest+rustls, wry 0.50, tray-icon, windows-sys 0.59) |
 | `build.rs` | Компиляция `ui/app.slint` со стилем `fluent` |
 | `.github/workflows/build.yml` | CI/CD сборка `x86_64-pc-windows-msvc` -> `dist/TorrServerUI.exe` |
 | `AGENT.md` | Регламент разработки для ИИ-агентов и чек-лист добавления модулей |
@@ -34,6 +34,7 @@
 | `src/modules/torrserver/server_manager.rs` | Запуск/остановка `TorrServer-windows-amd64.exe` (`CREATE_NO_WINDOW`), автообновление |
 | `src/modules/torrserver/player.rs` | Автопоиск плееров, запуск потока, генерация `.m3u`, `history.json` |
 | `src/modules/torrserver/rutracker.rs` | Клиент RuTracker (`windows-1251`, авторизация, прокси, парсинг `tracker.php`, загрузка `.torrent`) |
+| `src/modules/torrserver/rutracker_webview.rs` | Ленивый встроенный браузер Edge WebView2 (`wry`) для обхода Cloudflare и скачивания `.torrent` с RuTracker |
 | `src/modules/torrserver/clipboard.rs` | Фоновый перехват `magnet:?xt=...` из буфера обмена |
 
 ## 2. Таблица связей `AppWindow` (Slint ↔ Rust)
@@ -45,7 +46,7 @@
 | Раздачи | `torrents`, `selected-files`, `magnet-input`, `only-video-files`, `engine-missing`, `engine-update-progress`, `status-healthy` | `add-magnet`, `paste-and-add-magnet`, `pick-torrent-file`, `select-torrent`, `play-file`, `play-all-m3u`, `drop-torrent`, `remove-torrent`, `download-update-engine`, `pick-engine-exe`, `export-torrents`, `import-torrents` | `src/modules/torrserver/mod.rs` |
 | Поиск | `search-query`, `search-quality-filter`, `search-sort-mode`, `search-source-mode`, `search-results` | `search-torrents`, `set-search-quality`, `set-search-sort`, `set-search-source`, `add-search-result`, `play-search-result` | `src/modules/torrserver/mod.rs` |
 | История | `history-items`, `history-only-favorites` | `toggle-history-favorites`, `play-history-item`, `toggle-history-favorite`, `remove-history-item` | `src/modules/torrserver/mod.rs` |
-| Настройки TS | `ts-mode`, `ts-port`, `ts-remote-url`, `ts-cache-size-mb`, `engine-update-progress`, `player-presets`, `clipboard-watch`, `rt-*` | `save-ts-connection-settings`, `restart-ts-engine`, `download-update-engine`, `pick-engine-exe`, `save-ts-cache-settings`, `detect-players`, `pick-player-exe`, `save-player-settings`, `save-and-test-rutracker` | `src/modules/torrserver/mod.rs` |
+| Настройки TS | `ts-mode`, `ts-port`, `ts-remote-url`, `ts-cache-size-mb`, `engine-update-progress`, `player-presets`, `clipboard-watch`, `rt-*` (`rt-use-webview`) | `save-ts-connection-settings`, `restart-ts-engine`, `download-update-engine`, `pick-engine-exe`, `save-ts-cache-settings`, `detect-players`, `pick-player-exe`, `save-player-settings`, `save-and-test-rutracker`, `open-rutracker-webview` | `src/modules/torrserver/mod.rs` |
 | Диагностика и модули | `registered-modules`, `diag-logs`, `diag-problem-hint`, `diag-port-status`, `diag-api-ping` | `run-diagnostics-now`, `copy-diagnostics-report`, `copy-diagnostics-for-ai`, `clear-diagnostics-logs` | `src/main.rs`, `src/core/diagnostics.rs` |
 
 ## 3. Шпаргалка «В какой файл вносить изменения»

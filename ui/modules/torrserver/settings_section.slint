@@ -36,6 +36,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
 
     // 4. RuTracker Auth & Mirror
     in-out property <bool> rt-enabled: false;
+    in-out property <bool> rt-use-webview: false;
     in-out property <string> rt-mirror: "https://rutracker.org";
     in-out property <string> rt-username: "";
     in-out property <string> rt-password: "";
@@ -55,6 +56,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     callback pick-player-exe();
     callback save-player-settings();
     callback save-and-test-rutracker();
+    callback open-rutracker-webview();
 
     // Accordion 1: Server & Connection
     SettingsExpander {
@@ -363,6 +365,11 @@ export component TorrServerSettingsSection inherits VerticalLayout {
             checked <=> root.rt-enabled;
         }
 
+        Switch {
+            text: "Встроенный браузер Edge WebView2 (обход Cloudflare и VPN-блокировок)";
+            checked <=> root.rt-use-webview;
+        }
+
         HorizontalLayout {
             spacing: 12px;
             Text {
@@ -464,11 +471,17 @@ export component TorrServerSettingsSection inherits VerticalLayout {
         }
 
         HorizontalLayout {
+            spacing: 8px;
             FluentButton {
                 text: root.rt-testing ? "Проверка входа..." : "Сохранить и проверить вход";
                 primary: true;
                 enabled: !root.rt-testing;
                 clicked => { root.save-and-test-rutracker(); }
+            }
+            FluentButton {
+                text: "🌐  Войти через браузер (WebView2)";
+                enabled: !root.rt-testing;
+                clicked => { root.open-rutracker-webview(); }
             }
         }
     }

@@ -13,6 +13,7 @@ pub struct PortablePaths {
     pub ts_cache_dir: PathBuf,
     pub ts_playlists_dir: PathBuf,
     pub ts_history_path: PathBuf,
+    pub ts_webview_dir: PathBuf,
     pub modules_dir: PathBuf,
 }
 
@@ -48,6 +49,7 @@ impl PortablePaths {
             config_path: data_dir.join("config.json"),
             torrserver_exe: torrserver_dir.join("TorrServer-windows-amd64.exe"),
             ts_history_path: torrserver_dir.join("history.json"),
+            ts_webview_dir: torrserver_dir.join("webview2"),
             data_dir,
             torrserver_dir,
             ts_cache_dir,
@@ -101,6 +103,7 @@ pub struct TorrServerConfig {
     pub rutracker_proxy: String,
     pub rutracker_cookie: String,
     pub rutracker_user_agent: String,
+    pub rutracker_use_webview: bool,
 }
 
 impl Default for TorrServerConfig {
@@ -131,6 +134,7 @@ impl Default for TorrServerConfig {
             rutracker_proxy: String::new(),
             rutracker_cookie: String::new(),
             rutracker_user_agent: String::new(),
+            rutracker_use_webview: false,
         }
     }
 }
@@ -166,7 +170,8 @@ impl TorrServerConfig {
     }
 
     pub fn has_rutracker_credentials(&self) -> bool {
-        !self.rutracker_cookie.trim().is_empty()
+        self.rutracker_use_webview
+            || !self.rutracker_cookie.trim().is_empty()
             || (!self.rutracker_username.trim().is_empty() && !self.rutracker_password.is_empty())
     }
 

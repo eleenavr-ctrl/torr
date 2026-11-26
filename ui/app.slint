@@ -99,6 +99,7 @@ export component AppWindow inherits Window {
     in-out property <string> player-detect-status: "";
 
     in-out property <bool> rt-enabled: false;
+    in-out property <bool> rt-use-webview: false;
     in-out property <string> rt-mirror: "https://rutracker.org";
     in-out property <string> rt-username: "";
     in-out property <string> rt-password: "";
@@ -162,6 +163,7 @@ export component AppWindow inherits Window {
     callback pick-player-exe();
     callback save-player-settings();
     callback save-and-test-rutracker();
+    callback open-rutracker-webview();
 
     callback change-theme-mode(int);
     callback toggle-autostart(bool);
@@ -393,6 +395,7 @@ export component AppWindow inherits Window {
                             player-detect-status: root.player-detect-status;
 
                             rt-enabled <=> root.rt-enabled;
+                            rt-use-webview <=> root.rt-use-webview;
                             rt-mirror <=> root.rt-mirror;
                             rt-username <=> root.rt-username;
                             rt-password <=> root.rt-password;
@@ -412,6 +415,7 @@ export component AppWindow inherits Window {
                             pick-player-exe => { root.pick-player-exe(); }
                             save-player-settings => { root.save-player-settings(); }
                             save-and-test-rutracker => { root.save-and-test-rutracker(); }
+                            open-rutracker-webview => { root.open-rutracker-webview(); }
                         }
 
                         // Core Settings Accordion #4
