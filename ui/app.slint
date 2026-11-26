@@ -104,6 +104,7 @@ export component AppWindow inherits Window {
     in-out property <string> rt-password: "";
     in-out property <string> rt-proxy: "";
     in-out property <string> rt-cookie: "";
+    in-out property <string> rt-user-agent: "";
     in-out property <string> rt-auth-status: "";
     in-out property <bool> rt-testing: false;
 
@@ -397,6 +398,7 @@ export component AppWindow inherits Window {
                             rt-password <=> root.rt-password;
                             rt-proxy <=> root.rt-proxy;
                             rt-cookie <=> root.rt-cookie;
+                            rt-user-agent <=> root.rt-user-agent;
                             rt-auth-status: root.rt-auth-status;
                             rt-testing: root.rt-testing;
 

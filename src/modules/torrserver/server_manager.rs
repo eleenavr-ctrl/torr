@@ -71,10 +71,25 @@ impl ServerManager {
 
         let port_str = cfg.port.to_string();
         let cache_str = self.paths.ts_cache_dir.to_string_lossy().to_string();
+        let use_yaml_mode = detect_yaml_config_mode(&self.paths.torrserver_exe);
 
         let mut cmd = Command::new(&self.paths.torrserver_exe);
-        cmd.args(["--port", &port_str, "--path", &cache_str, "--rdb"])
-            .current_dir(&self.paths.torrserver_dir)
+        if use_yaml_mode {
+            diagnostics::info(
+                "[TS:ENGINE]",
+                "Обнаружен TorrServer нового формата (-c config.yaml): запуск в data/torrserver/",
+            );
+            let cfg_yaml = self.paths.torrserver_dir.join("config.yaml");
+            if cfg_yaml.exists() {
+                cmd.args(["-c", "config.yaml"]);
+            }
+            cmd.env("TS_PORT", &port_str)
+                .env("TS_PATH", &cache_str);
+        } else {
+            cmd.args(["--port", &port_str, "--path", &cache_str, "--rdb"]);
+        }
+
+        cmd.current_dir(&self.paths.torrserver_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -434,6 +449,32 @@ where
         0.95,
     );
     Ok(())
+}
+
+fn detect_yaml_config_mode(exe_path: &Path) -> bool {
+    let mut cmd = Command::new(exe_path);
+    cmd.arg("-h")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let Ok(output) = cmd.output() else {
+        return false;
+    };
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    text.push('\n');
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+
+    let low = text.to_lowercase();
+    let has_port_flag = low.contains("--port") || low.contains("-port") || low.contains(" -p ");
+    let has_yaml_flag = low.contains("config.yaml") || low.contains("yaml configuration");
+
+    has_yaml_flag && !has_port_flag
 }
 
 fn format_error_chain(err: &dyn StdError) -> String {

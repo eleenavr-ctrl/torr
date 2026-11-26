@@ -41,6 +41,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     in-out property <string> rt-password: "";
     in-out property <string> rt-proxy: "";
     in-out property <string> rt-cookie: "";
+    in-out property <string> rt-user-agent: "";
     in-out property <string> rt-auth-status: "";
     in-out property <bool> rt-testing: false;
 
@@ -434,6 +435,23 @@ export component TorrServerSettingsSection inherits VerticalLayout {
                 text <=> root.rt-cookie;
                 input-type: InputType.password;
                 placeholder-text: "bb_session=... (при 403/Cloudflare: bb_session=...; cf_clearance=...)";
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "User-Agent (опционально):";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.rt-user-agent;
+                placeholder-text: "Как в браузере (для cf_clearance: F12 -> Console -> navigator.userAgent)";
             }
         }
 

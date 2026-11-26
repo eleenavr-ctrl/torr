@@ -100,6 +100,7 @@ pub struct TorrServerConfig {
     pub rutracker_password: String,
     pub rutracker_proxy: String,
     pub rutracker_cookie: String,
+    pub rutracker_user_agent: String,
 }
 
 impl Default for TorrServerConfig {
@@ -129,6 +130,7 @@ impl Default for TorrServerConfig {
             rutracker_password: String::new(),
             rutracker_proxy: String::new(),
             rutracker_cookie: String::new(),
+            rutracker_user_agent: String::new(),
         }
     }
 }
@@ -166,6 +168,25 @@ impl TorrServerConfig {
     pub fn has_rutracker_credentials(&self) -> bool {
         !self.rutracker_cookie.trim().is_empty()
             || (!self.rutracker_username.trim().is_empty() && !self.rutracker_password.is_empty())
+    }
+
+    pub fn effective_rutracker_user_agent(&self) -> String {
+        let mut cleaned = self
+            .rutracker_user_agent
+            .replace(['\r', '\n'], " ")
+            .trim()
+            .to_string();
+        if let Some(rest) = cleaned
+            .strip_prefix("User-Agent:")
+            .or_else(|| cleaned.strip_prefix("user-agent:"))
+        {
+            cleaned = rest.trim().to_string();
+        }
+        if cleaned.is_empty() {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string()
+        } else {
+            cleaned
+        }
     }
 }
 

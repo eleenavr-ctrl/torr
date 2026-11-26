@@ -11,9 +11,6 @@ use std::error::Error as StdError;
 use std::sync::Mutex;
 use std::time::Duration;
 
-const USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
 pub enum RuTrackerPayload {
     TorrentBytes { bytes: Vec<u8>, filename: String },
     Magnet(String),
@@ -307,12 +304,13 @@ fn format_error_chain(err: &dyn StdError) -> String {
 
 fn session_key(cfg: &TorrServerConfig) -> String {
     format!(
-        "{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}",
         cfg.effective_rutracker_mirror(),
         cfg.rutracker_username.trim(),
         cfg.rutracker_password,
         cfg.rutracker_proxy.trim(),
-        cfg.rutracker_cookie.trim()
+        cfg.rutracker_cookie.trim(),
+        cfg.effective_rutracker_user_agent()
     )
 }
 
@@ -351,12 +349,13 @@ fn build_http_client(cfg: &TorrServerConfig) -> Result<Client, String> {
         HeaderValue::from_static("1"),
     );
 
+    let ua = cfg.effective_rutracker_user_agent();
     let mut builder = Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(15))
         .cookie_store(true)
         .default_headers(default_headers)
-        .user_agent(USER_AGENT);
+        .user_agent(&ua);
 
     let proxy_str = cfg.rutracker_proxy.trim();
     if !proxy_str.is_empty() {

@@ -217,6 +217,7 @@ impl AppModule for TorrServerModule {
         ui.set_rt_password(cfg.rutracker_password.clone().into());
         ui.set_rt_proxy(cfg.rutracker_proxy.clone().into());
         ui.set_rt_cookie(cfg.rutracker_cookie.clone().into());
+        ui.set_rt_user_agent(cfg.rutracker_user_agent.clone().into());
         if cfg.rutracker_enabled && cfg.has_rutracker_credentials() {
             ui.set_rt_auth_status("Учётные данные сохранены".into());
         }
@@ -1024,6 +1025,7 @@ impl AppModule for TorrServerModule {
                     let password = app.get_rt_password().to_string();
                     let proxy = app.get_rt_proxy().trim().to_string();
                     let cookie = app.get_rt_cookie().trim().to_string();
+                    let user_agent = app.get_rt_user_agent().replace(['\r', '\n'], " ").trim().to_string();
 
                     shared.update_ts_config(|c| {
                         c.rutracker_enabled = enabled;
@@ -1036,6 +1038,7 @@ impl AppModule for TorrServerModule {
                         c.rutracker_password = password;
                         c.rutracker_proxy = proxy;
                         c.rutracker_cookie = cookie;
+                        c.rutracker_user_agent = user_agent;
                     });
 
                     app.set_rt_testing(true);
