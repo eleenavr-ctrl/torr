@@ -5,7 +5,9 @@ use crate::modules::torrserver::api::{
 };
 use encoding_rs::WINDOWS_1251;
 use reqwest::blocking::Client;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE};
 use reqwest::Proxy;
+use std::error::Error as StdError;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -195,17 +197,22 @@ impl RuTrackerClient {
             .header("Referer", format!("{base}/forum/index.php"))
             .body(body)
             .send()
-            .map_err(|e| format!("Ошибка подключения к RuTracker ({base}): {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "Ошибка подключения к RuTracker ({base}): {}",
+                    format_error_chain(&e)
+                )
+            })?;
 
         let status = resp.status();
+        let headers = resp.headers().clone();
         let raw_bytes = resp
             .bytes()
             .map_err(|e| format!("Ошибка чтения ответа авторизации RuTracker: {e}"))?;
-        if !status.is_success() {
-            return Err(format!("RuTracker login HTTP {}", status.as_u16()));
-        }
-
         let html = decode_cp1251(&raw_bytes);
+        if !status.is_success() {
+            return Err(diagnose_http_error(status.as_u16(), &headers, &html, "входе"));
+        }
         let low = html.to_lowercase();
         if low.contains("cap_sid") || low.contains("cap_code") || low.contains("код подтверждения") {
             return Err(
@@ -244,16 +251,58 @@ impl RuTrackerClient {
         if let Some(cookie_hdr) = normalized_cookie_header(&cfg.rutracker_cookie) {
             req = req.header("Cookie", cookie_hdr);
         }
-        let resp = req
-            .send()
-            .map_err(|e| format!("Ошибка запроса к RuTracker: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("RuTracker HTTP {}", resp.status().as_u16()));
+        let resp = req.send().map_err(|e| {
+            format!(
+                "Ошибка запроса к RuTracker: {}",
+                format_error_chain(&e)
+            )
+        })?;
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let raw_bytes = resp
+            .bytes()
+            .map_err(|e| format!("Ошибка чтения ответа RuTracker: {e}"))?;
+        if !status.is_success() {
+            let preview = decode_cp1251(&raw_bytes[..raw_bytes.len().min(4096)]);
+            return Err(diagnose_http_error(status.as_u16(), &headers, &preview, "запросе"));
         }
-        resp.bytes()
-            .map(|b| b.to_vec())
-            .map_err(|e| format!("Ошибка чтения ответа RuTracker: {e}"))
+        Ok(raw_bytes.to_vec())
     }
+}
+
+fn diagnose_http_error(code: u16, headers: &HeaderMap, body_preview: &str, stage: &str) -> String {
+    let low = body_preview.to_lowercase();
+    let is_cf = headers.contains_key("cf-mitigated")
+        || headers.contains_key("cf-ray")
+        || low.contains("cloudflare")
+        || low.contains("just a moment")
+        || low.contains("attention required")
+        || low.contains("cf-browser-verification");
+
+    if code == 403 && is_cf {
+        return format!(
+            "RuTracker HTTP 403 (Cloudflare блокирует автоматический запрос при {stage}). Укажите другое зеркало (например rutracker.net) или вставьте полную строку Cookie (bb_session=...; cf_clearance=...) из браузера."
+        );
+    }
+    if code == 403 {
+        return format!(
+            "RuTracker HTTP 403 при {stage} (доступ запрещён для текущего IP/зеркала или устаревшая cookie)"
+        );
+    }
+    format!("RuTracker HTTP {code}")
+}
+
+fn format_error_chain(err: &dyn StdError) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut cur = err.source();
+    while let Some(src) = cur {
+        let s = src.to_string();
+        if !parts.last().map(|p| p == &s).unwrap_or(false) {
+            parts.push(s);
+        }
+        cur = src.source();
+    }
+    parts.join(" -> ")
 }
 
 fn session_key(cfg: &TorrServerConfig) -> String {
@@ -268,21 +317,45 @@ fn session_key(cfg: &TorrServerConfig) -> String {
 }
 
 fn normalized_cookie_header(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
+    let mut cleaned = raw.replace(['\r', '\n'], " ").trim().to_string();
+    if let Some(rest) = cleaned
+        .strip_prefix("Cookie:")
+        .or_else(|| cleaned.strip_prefix("cookie:"))
+    {
+        cleaned = rest.trim().to_string();
+    }
+    if cleaned.is_empty() {
         return None;
     }
-    if trimmed.contains('=') {
-        Some(trimmed.to_string())
+    if cleaned.contains('=') {
+        Some(cleaned)
     } else {
-        Some(format!("bb_session={trimmed}"))
+        Some(format!("bb_session={cleaned}"))
     }
 }
 
 fn build_http_client(cfg: &TorrServerConfig) -> Result<Client, String> {
+    let mut default_headers = HeaderMap::new();
+    default_headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        ),
+    );
+    default_headers.insert(
+        ACCEPT_LANGUAGE,
+        HeaderValue::from_static("ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"),
+    );
+    default_headers.insert(
+        HeaderName::from_static("upgrade-insecure-requests"),
+        HeaderValue::from_static("1"),
+    );
+
     let mut builder = Client::builder()
-        .timeout(Duration::from_secs(12))
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(15))
         .cookie_store(true)
+        .default_headers(default_headers)
         .user_agent(USER_AGENT);
 
     let proxy_str = cfg.rutracker_proxy.trim();

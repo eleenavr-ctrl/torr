@@ -416,7 +416,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
                 horizontal-stretch: 1;
                 text <=> root.rt-cookie;
                 input-type: InputType.password;
-                placeholder-text: "Запасной вход (нужен только если RuTracker просит капчу)";
+                placeholder-text: "bb_session=... (при 403/Cloudflare: bb_session=...; cf_clearance=...)";
             }
         }
 

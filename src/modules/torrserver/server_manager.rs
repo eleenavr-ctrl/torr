@@ -3,8 +3,9 @@ use crate::core::storage::{PortablePaths, TorrServerConfig};
 use crate::modules::torrserver::api::TorrServerApi;
 use reqwest::blocking::Client;
 use serde::Deserialize;
+use std::error::Error as StdError;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -168,12 +169,19 @@ impl ServerManager {
         on_status("Запрос последнего релиза YouROK/TorrServer...");
         diagnostics::info("[TS:UPDATER]", "Проверка релизов YouROK/TorrServer на GitHub");
 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(120))
+        let api_client = Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| format!("Ошибка HTTP-клиента: {e}"))?;
 
-        let (tag_name, download_url) = match client
+        let dl_client = Client::builder()
+            .connect_timeout(Duration::from_secs(20))
+            .timeout(Duration::from_secs(600))
+            .build()
+            .map_err(|e| format!("Ошибка HTTP-клиента загрузки: {e}"))?;
+
+        let (tag_name, download_url) = match api_client
             .get("https://api.github.com/repos/YouROK/TorrServer/releases/latest")
             .header("User-Agent", "TorrServerUI/0.1.0")
             .send()
@@ -207,7 +215,7 @@ impl ServerManager {
             Err(e) => {
                 diagnostics::warn(
                     "[TS:UPDATER]",
-                    format!("GitHub API недоступен ({e}) — пробуем прямую ссылку latest/download"),
+                    format!("GitHub API недоступен ({}) — пробуем прямую ссылку latest/download", format_error_chain(&e)),
                 );
                 (
                     "latest".to_string(),
@@ -216,37 +224,45 @@ impl ServerManager {
             }
         };
 
-        on_status(&format!("Скачивание TorrServer ({tag_name})..."));
-        diagnostics::info(
-            "[TS:UPDATER]",
-            format!("Скачивание ({tag_name}): {download_url}"),
-        );
-
-        let resp = client
-            .get(&download_url)
-            .header("User-Agent", "TorrServerUI/0.1.0")
-            .send()
-            .map_err(|e| format!("Ошибка скачивания бинарника: {e}"))?
-            .error_for_status()
-            .map_err(|e| format!("Ошибка HTTP при скачивании бинарника: {e}"))?;
-
         let new_path = self.paths.torrserver_exe.with_extension("exe.new");
-        let bytes = resp
-            .bytes()
-            .map_err(|e| format!("Ошибка чтения потока файла: {e}"))?;
+        let max_attempts = 3usize;
+        let mut last_err = String::new();
 
-        if bytes.len() < 1024 * 1024 || !bytes.starts_with(b"MZ") {
-            return Err(format!(
-                "Скачанный файл не является корректным Windows .exe ({} байт)",
-                bytes.len()
+        for attempt in 1..=max_attempts {
+            on_status(&format!(
+                "Скачивание TorrServer ({tag_name}){}",
+                if attempt > 1 {
+                    format!(" — попытка {attempt}/{max_attempts}...")
+                } else {
+                    "...".to_string()
+                }
             ));
+            diagnostics::info(
+                "[TS:UPDATER]",
+                format!("Скачивание ({tag_name}, попытка {attempt}/{max_attempts}): {download_url}"),
+            );
+
+            match stream_download_exe(&dl_client, &download_url, &new_path, &tag_name, &on_status) {
+                Ok(_) => {
+                    last_err.clear();
+                    break;
+                }
+                Err(e) => {
+                    let _ = fs::remove_file(&new_path);
+                    last_err = e;
+                    diagnostics::warn(
+                        "[TS:UPDATER]",
+                        format!("Попытка {attempt}/{max_attempts} не удалась: {last_err}"),
+                    );
+                    if attempt < max_attempts {
+                        thread::sleep(Duration::from_millis(900));
+                    }
+                }
+            }
         }
 
-        {
-            let mut file = fs::File::create(&new_path)
-                .map_err(|e| format!("Не удалось создать временный файл .new: {e}"))?;
-            file.write_all(&bytes)
-                .map_err(|e| format!("Ошибка записи .new файла: {e}"))?;
+        if !last_err.is_empty() {
+            return Err(last_err);
         }
 
         on_status("Остановка текущего процесса и замена файла...");
@@ -298,4 +314,96 @@ impl ServerManager {
         }
         Ok(())
     }
+}
+
+fn stream_download_exe<F>(
+    client: &Client,
+    url: &str,
+    dest_path: &Path,
+    tag_name: &str,
+    on_status: &F,
+) -> Result<(), String>
+where
+    F: Fn(&str),
+{
+    let mut resp = client
+        .get(url)
+        .header("User-Agent", "TorrServerUI/0.1.0")
+        .send()
+        .map_err(|e| format!("Ошибка скачивания бинарника: {}", format_error_chain(&e)))?
+        .error_for_status()
+        .map_err(|e| format!("Ошибка HTTP при скачивании бинарника: {}", format_error_chain(&e)))?;
+
+    let expected_len = resp.content_length();
+    let mut file = fs::File::create(dest_path)
+        .map_err(|e| format!("Не удалось создать временный файл .new: {e}"))?;
+
+    let mut buf = [0u8; 65536];
+    let mut total: u64 = 0;
+    let mut header_checked = false;
+    let mut last_reported_mb: u64 = 0;
+
+    loop {
+        let n = resp
+            .read(&mut buf)
+            .map_err(|e| format!("Ошибка чтения потока файла (скачано {total} Б): {e}"))?;
+        if n == 0 {
+            break;
+        }
+        if !header_checked {
+            if n < 2 || &buf[..2] != b"MZ" {
+                return Err("Сервер вернул не Windows .exe (возможно, HTML-страницу блокировки/ошибки)".to_string());
+            }
+            header_checked = true;
+        }
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("Ошибка записи .new файла: {e}"))?;
+        total += n as u64;
+
+        let cur_mb = total / (1024 * 1024);
+        if cur_mb > last_reported_mb {
+            last_reported_mb = cur_mb;
+            let mb_done = total as f64 / (1024.0 * 1024.0);
+            if let Some(exp) = expected_len.filter(|&v| v > 0) {
+                let mb_total = exp as f64 / (1024.0 * 1024.0);
+                on_status(&format!(
+                    "Скачивание TorrServer ({tag_name}): {mb_done:.1} / {mb_total:.1} МБ"
+                ));
+            } else {
+                on_status(&format!(
+                    "Скачивание TorrServer ({tag_name}): {mb_done:.1} МБ"
+                ));
+            }
+        }
+    }
+
+    file.flush()
+        .map_err(|e| format!("Ошибка сброса буфера .new файла: {e}"))?;
+
+    if total < 1024 * 1024 {
+        return Err(format!(
+            "Скачанный файл слишком мал ({total} байт) — повреждён или заблокирован"
+        ));
+    }
+    if let Some(exp) = expected_len.filter(|&v| v > 0) {
+        if total != exp {
+            return Err(format!(
+                "Загрузка оборвалась: получено {total} из {exp} байт"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn format_error_chain(err: &dyn StdError) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut cur = err.source();
+    while let Some(src) = cur {
+        let s = src.to_string();
+        if !parts.last().map(|p| p == &s).unwrap_or(false) {
+            parts.push(s);
+        }
+        cur = src.source();
+    }
+    parts.join(" -> ")
 }
