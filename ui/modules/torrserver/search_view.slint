@@ -6,6 +6,7 @@ export component SearchView inherits Rectangle {
     in-out property <string> search-query: "";
     in-out property <string> quality-filter: "ALL";
     in-out property <int> sort-mode: 0; // 0 = Seeds, 1 = Size
+    in-out property <int> source-mode: 0; // 0 = All, 1 = RuTor, 2 = RuTracker, 3 = JacRed
     in-out property <bool> loading: false;
     in-out property <string> error-text: "";
     in-out property <[SearchResultItem]> results;
@@ -13,6 +14,7 @@ export component SearchView inherits Rectangle {
     callback search-torrents(string);
     callback set-quality(string);
     callback set-sort(int);
+    callback set-source(int);
     callback add-search-result(string, string);
     callback play-search-result(string, string);
 
@@ -33,7 +35,7 @@ export component SearchView inherits Rectangle {
                 color: Theme.text-primary;
             }
             Text {
-                text: "Встроенный поиск по RuTor с резервным источником JacRed";
+                text: "Поиск раздач по RuTor, RuTracker (через ваш аккаунт) и резервному JacRed";
                 font-family: Theme.font-ui;
                 font-size: 12px;
                 color: Theme.text-secondary;
@@ -67,6 +69,38 @@ export component SearchView inherits Rectangle {
                                 root.search-torrents(root.search-query);
                             }
                         }
+                    }
+                }
+
+                // Source pills
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "Источник:";
+                        font-family: Theme.font-ui;
+                        font-size: 12px;
+                        color: Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                    FluentPill {
+                        text: "Все";
+                        active: root.source-mode == 0;
+                        clicked => { root.set-source(0); }
+                    }
+                    FluentPill {
+                        text: "RuTor";
+                        active: root.source-mode == 1;
+                        clicked => { root.set-source(1); }
+                    }
+                    FluentPill {
+                        text: "RuTracker";
+                        active: root.source-mode == 2;
+                        clicked => { root.set-source(2); }
+                    }
+                    FluentPill {
+                        text: "JacRed";
+                        active: root.source-mode == 3;
+                        clicked => { root.set-source(3); }
                     }
                 }
 

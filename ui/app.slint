@@ -64,6 +64,7 @@ export component AppWindow inherits Window {
     in-out property <string> search-query: "";
     in-out property <string> search-quality-filter: "ALL";
     in-out property <int> search-sort-mode: 0;
+    in-out property <int> search-source-mode: 0;
     in-out property <bool> search-loading: false;
     in-out property <string> search-error: "";
     in-out property <[SearchResultItem]> search-results;
@@ -95,6 +96,15 @@ export component AppWindow inherits Window {
     in-out property <string> player-args: "";
     in-out property <bool> clipboard-watch: false;
     in-out property <string> player-detect-status: "";
+
+    in-out property <bool> rt-enabled: false;
+    in-out property <string> rt-mirror: "https://rutracker.org";
+    in-out property <string> rt-username: "";
+    in-out property <string> rt-password: "";
+    in-out property <string> rt-proxy: "";
+    in-out property <string> rt-cookie: "";
+    in-out property <string> rt-auth-status: "";
+    in-out property <bool> rt-testing: false;
 
     // Settings: Core & Modules
     in-out property <int> theme-mode: 0;
@@ -131,6 +141,7 @@ export component AppWindow inherits Window {
     callback search-torrents(string);
     callback set-search-quality(string);
     callback set-search-sort(int);
+    callback set-search-source(int);
     callback add-search-result(string, string);
     callback play-search-result(string, string);
 
@@ -147,6 +158,7 @@ export component AppWindow inherits Window {
     callback detect-players();
     callback pick-player-exe();
     callback save-player-settings();
+    callback save-and-test-rutracker();
 
     callback change-theme-mode(int);
     callback toggle-autostart(bool);
@@ -300,6 +312,7 @@ export component AppWindow inherits Window {
                     search-query <=> root.search-query;
                     quality-filter: root.search-quality-filter;
                     sort-mode: root.search-sort-mode;
+                    source-mode: root.search-source-mode;
                     loading: root.search-loading;
                     error-text: root.search-error;
                     results: root.search-results;
@@ -307,6 +320,7 @@ export component AppWindow inherits Window {
                     search-torrents(q) => { root.search-torrents(q); }
                     set-quality(q) => { root.set-search-quality(q); }
                     set-sort(s) => { root.set-search-sort(s); }
+                    set-source(src) => { root.set-search-source(src); }
                     add-search-result(m, t) => { root.add-search-result(m, t); }
                     play-search-result(m, t) => { root.play-search-result(m, t); }
                 }
@@ -372,6 +386,15 @@ export component AppWindow inherits Window {
                             clipboard-watch <=> root.clipboard-watch;
                             player-detect-status: root.player-detect-status;
 
+                            rt-enabled <=> root.rt-enabled;
+                            rt-mirror <=> root.rt-mirror;
+                            rt-username <=> root.rt-username;
+                            rt-password <=> root.rt-password;
+                            rt-proxy <=> root.rt-proxy;
+                            rt-cookie <=> root.rt-cookie;
+                            rt-auth-status: root.rt-auth-status;
+                            rt-testing: root.rt-testing;
+
                             save-ts-connection-settings => { root.save-ts-connection-settings(); }
                             restart-ts-engine => { root.restart-ts-engine(); }
                             download-update-engine => { root.download-update-engine(); }
@@ -380,6 +403,7 @@ export component AppWindow inherits Window {
                             detect-players => { root.detect-players(); }
                             pick-player-exe => { root.pick-player-exe(); }
                             save-player-settings => { root.save-player-settings(); }
+                            save-and-test-rutracker => { root.save-and-test-rutracker(); }
                         }
 
                         // Core Settings Accordion #4

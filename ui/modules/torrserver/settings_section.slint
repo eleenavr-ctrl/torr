@@ -33,6 +33,16 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     in-out property <bool> clipboard-watch: false;
     in-out property <string> player-detect-status: "";
 
+    // 4. RuTracker Auth & Mirror
+    in-out property <bool> rt-enabled: false;
+    in-out property <string> rt-mirror: "https://rutracker.org";
+    in-out property <string> rt-username: "";
+    in-out property <string> rt-password: "";
+    in-out property <string> rt-proxy: "";
+    in-out property <string> rt-cookie: "";
+    in-out property <string> rt-auth-status: "";
+    in-out property <bool> rt-testing: false;
+
     callback save-ts-connection-settings();
     callback restart-ts-engine();
     callback download-update-engine();
@@ -41,6 +51,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     callback detect-players();
     callback pick-player-exe();
     callback save-player-settings();
+    callback save-and-test-rutracker();
 
     // Accordion 1: Server & Connection
     SettingsExpander {
@@ -313,6 +324,110 @@ export component TorrServerSettingsSection inherits VerticalLayout {
                 text: "Сохранить настройки плеера";
                 primary: true;
                 clicked => { root.save-player-settings(); }
+            }
+        }
+    }
+
+    // Accordion 4: RuTracker Auth & Mirror
+    SettingsExpander {
+        title: "[Модуль TorrServer] Поиск и авторизация RuTracker";
+        subtitle: "Вход в ваш аккаунт RuTracker, зеркало и опциональный прокси";
+        icon-glyph: "⛨";
+
+        Switch {
+            text: "Включить прямой поиск по RuTracker";
+            checked <=> root.rt-enabled;
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Домен / зеркало:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.rt-mirror;
+                placeholder-text: "https://rutracker.org";
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Аккаунт RuTracker:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.rt-username;
+                placeholder-text: "Логин";
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.rt-password;
+                input-type: InputType.password;
+                placeholder-text: "Пароль";
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Прокси (опционально):";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.rt-proxy;
+                placeholder-text: "Например: socks5h://127.0.0.1:1080 или http://127.0.0.1:8080";
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Cookie bb_session:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.rt-cookie;
+                input-type: InputType.password;
+                placeholder-text: "Запасной вход (нужен только если RuTracker просит капчу)";
+            }
+        }
+
+        if (root.rt-auth-status != "") : Text {
+            text: root.rt-auth-status;
+            font-family: Theme.font-ui;
+            font-size: 12px;
+            color: Theme.accent;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            FluentButton {
+                text: root.rt-testing ? "Проверка входа..." : "Сохранить и проверить вход";
+                primary: true;
+                enabled: !root.rt-testing;
+                clicked => { root.save-and-test-rutracker(); }
             }
         }
     }

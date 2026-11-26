@@ -1,9 +1,9 @@
 # HANDOFF.md — Передача контекста и инструкция по сборке
 
 ## 1. Текущее состояние проекта
-Проект **TorrServerUI v0.1.0** полностью спроектирован и реализован в составе 30 файлов:
+Проект **TorrServerUI v0.1.0** полностью спроектирован и реализован в составе 31 файла:
 - Ядро оболочки (`src/core/*`) с темой Windows 11, треем, Single-Instance Mutex, Win32 Drag-and-Drop и шиной диагностики.
-- Реестр модулей (`src/modules/mod.rs`) и первый самодостаточный модуль `torrserver` (`src/modules/torrserver/*`).
+- Реестр модулей (`src/modules/mod.rs`) и первый самодостаточный модуль `torrserver` (`src/modules/torrserver/*`, включая прямой поиск по RuTracker и экспорт/импорт `.json`).
 - Полный интерфейс на Slint 1.9 (`fluent`) в `ui/`.
 - CI workflow для Windows x64 в `.github/workflows/build.yml`.
 

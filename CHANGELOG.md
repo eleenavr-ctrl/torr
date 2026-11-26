@@ -8,6 +8,7 @@
 - `src/modules/torrserver/api.rs`: переработан разбор ответов `/search/?query=` и JacRed на базе `serde_json::Value` (поддержка полей `Link`/`Magnet`/`Hash`, `Title`/`Name`, `null`-значений), добавлена проверка `EnableRutorSearch` и резервные зеркала JacRed (`jacred.xyz`, `jacred.stream`, `jr.maxvol.pro`).
 - `src/modules/torrserver/player.rs`: расширен автопоиск видеоплееров (`LocalAppData`, `AppData`, `Scoop`, `Chocolatey`, 64-битный K-Lite и read-only чтение `App Paths` из реестра Windows с раскрытием `%VAR%`).
 - Экспорт и импорт списка раздач в `.json` (`⬇ Экспорт .json` / `⬆ Импорт .json` на вкладке «Раздачи»): перенос раздач с сохранением `hash`, `title`, `poster` и `data` между запущенными экземплярами TorrServer в один клик.
+- Прямой поиск по **RuTracker** (`src/modules/torrserver/rutracker.rs`): авторизация логином/паролем (или cookie `bb_session`), кодировка `windows-1251`, настройка зеркала и прокси (`http`/`socks5h`), переключатель источника в «Поиске» (`Все` / `RuTor` / `RuTracker` / `JacRed`) и автоматическая загрузка `.torrent`/magnet в TorrServer.
 - Подготовка к расширению модульной системы (поддержка внешнего каталога `./data/modules/`).
 
 ## [0.1.0] — 2026-11-26

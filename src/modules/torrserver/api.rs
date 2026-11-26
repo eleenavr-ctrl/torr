@@ -309,7 +309,14 @@ impl TorrServerApi {
             .and_then(|n| n.to_str())
             .unwrap_or("upload.torrent")
             .to_string();
+        self.upload_torrent_bytes(bytes, filename)
+    }
 
+    pub fn upload_torrent_bytes(
+        &self,
+        bytes: Vec<u8>,
+        filename: String,
+    ) -> Result<ApiTorrent, String> {
         let part = Part::bytes(bytes).file_name(filename);
         let form = Form::new().part("file", part);
         let url = format!("{}/torrent/upload", self.base_url);
@@ -390,11 +397,8 @@ impl TorrServerApi {
         Ok(())
     }
 
-    pub fn search(&self, query: &str) -> Result<Vec<ApiSearchResult>, String> {
+    pub fn search_rutor(&self, query: &str) -> Result<Vec<ApiSearchResult>, String> {
         let encoded = urlencoding::encode(query.trim());
-
-        // 1. Built-in TorrServer RuTor search (/search/?query=...)
-        let mut rutor_note = String::new();
         let ts_search_url = format!("{}/search/?query={}", self.base_url, encoded);
         match self.auth(self.client.get(&ts_search_url)).send() {
             Ok(resp) if resp.status().is_success() => {
@@ -405,11 +409,11 @@ impl TorrServerApi {
                         .get_settings()
                         .map(|s| !s.enable_rutor_search)
                         .unwrap_or(false);
-                    rutor_note = if rutor_disabled {
-                        "встроенный поиск RuTor отключён в настройках TorrServer".to_string()
+                    if rutor_disabled {
+                        Err("встроенный поиск RuTor отключён в настройках TorrServer".to_string())
                     } else {
-                        "RuTor вернул 0 результатов".to_string()
-                    };
+                        Ok(Vec::new())
+                    }
                 } else {
                     match serde_json::from_str::<Value>(trimmed) {
                         Ok(val) => {
@@ -430,25 +434,13 @@ impl TorrServerApi {
                                             mapped.len()
                                         ),
                                     );
-                                    return Ok(mapped);
                                 }
-                                let rutor_disabled = self
-                                    .get_settings()
-                                    .map(|s| !s.enable_rutor_search)
-                                    .unwrap_or(false);
-                                rutor_note = if rutor_disabled {
-                                    "встроенный поиск RuTor отключён в настройках TorrServer"
-                                        .to_string()
-                                } else {
-                                    "RuTor вернул 0 подходящих раздач".to_string()
-                                };
+                                Ok(mapped)
                             } else {
-                                rutor_note = "RuTor вернул неожиданный формат JSON".to_string();
+                                Err("RuTor вернул неожиданный формат JSON".to_string())
                             }
                         }
-                        Err(e) => {
-                            rutor_note = format!("RuTor JSON: {e}");
-                        }
+                        Err(e) => Err(format!("RuTor JSON: {e}")),
                     }
                 }
             }
@@ -461,25 +453,21 @@ impl TorrServerApi {
                     .map(|s| !s.enable_rutor_search)
                     .unwrap_or(false);
                 if rutor_disabled {
-                    rutor_note =
-                        format!("RuTor отключён в настройках TorrServer (HTTP {code})");
+                    Err(format!(
+                        "RuTor отключён в настройках TorrServer (HTTP {code})"
+                    ))
                 } else if body_trim.is_empty() {
-                    rutor_note = format!("RuTor HTTP {code}");
+                    Err(format!("RuTor HTTP {code}"))
                 } else {
-                    rutor_note = format!("RuTor HTTP {code} ({body_trim})");
+                    Err(format!("RuTor HTTP {code} ({body_trim})"))
                 }
             }
-            Err(e) => {
-                rutor_note = format!("RuTor недоступен: {e}");
-            }
+            Err(e) => Err(format!("RuTor недоступен: {e}")),
         }
+    }
 
-        // 2. Fallback to public JacRed mirrors
-        diagnostics::info(
-            "[TS:API]",
-            format!("{rutor_note} — выполняется fallback-поиск JacRed"),
-        );
-
+    pub fn search_jacred(&self, query: &str) -> Result<Vec<ApiSearchResult>, String> {
+        let encoded = urlencoding::encode(query.trim());
         let mirrors = [
             "https://jacred.xyz",
             "https://jacred.stream",
@@ -532,9 +520,7 @@ impl TorrServerApi {
             }
         }
 
-        Err(format!(
-            "Поиск не дал результатов ({rutor_note}; JacRed: {last_err}). Включите «Встроенный поиск RuTor» в Настройках и нажмите «Применить параметры движка (/settings)»."
-        ))
+        Err(last_err)
     }
 
     pub fn stream_url(&self, hash: &str, file_id: i32, file_name: &str) -> String {
@@ -594,7 +580,7 @@ pub fn format_speed(bytes_per_sec: f64) -> String {
     }
 }
 
-fn detect_quality(title: &str) -> String {
+pub(crate) fn detect_quality(title: &str) -> String {
     let low = title.to_lowercase();
     let mut tags = Vec::new();
     if low.contains("2160p") || low.contains("4k") || low.contains("uhd") {
@@ -738,7 +724,7 @@ fn parse_jacred_value(v: &Value) -> Option<ApiSearchResult> {
     })
 }
 
-fn parse_size_bytes(size_str: &str) -> f64 {
+pub(crate) fn parse_size_bytes(size_str: &str) -> f64 {
     let normalized = size_str.replace(',', ".").to_lowercase();
     let num_str: String = normalized
         .trim()

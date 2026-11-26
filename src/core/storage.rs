@@ -94,6 +94,12 @@ pub struct TorrServerConfig {
     pub enable_ipv6: bool,
     pub enable_dlna: bool,
     pub enable_rutor: bool,
+    pub rutracker_enabled: bool,
+    pub rutracker_mirror: String,
+    pub rutracker_username: String,
+    pub rutracker_password: String,
+    pub rutracker_proxy: String,
+    pub rutracker_cookie: String,
 }
 
 impl Default for TorrServerConfig {
@@ -117,6 +123,12 @@ impl Default for TorrServerConfig {
             enable_ipv6: false,
             enable_dlna: false,
             enable_rutor: true,
+            rutracker_enabled: false,
+            rutracker_mirror: "https://rutracker.org".to_string(),
+            rutracker_username: String::new(),
+            rutracker_password: String::new(),
+            rutracker_proxy: String::new(),
+            rutracker_cookie: String::new(),
         }
     }
 }
@@ -135,6 +147,25 @@ impl TorrServerConfig {
         } else {
             format!("http://127.0.0.1:{}", self.port)
         }
+    }
+
+    pub fn effective_rutracker_mirror(&self) -> String {
+        let mut trimmed = self.rutracker_mirror.trim().trim_end_matches('/').to_string();
+        if let Some(stripped) = trimmed.strip_suffix("/forum") {
+            trimmed = stripped.to_string();
+        }
+        if trimmed.is_empty() {
+            "https://rutracker.org".to_string()
+        } else if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            trimmed
+        } else {
+            format!("https://{trimmed}")
+        }
+    }
+
+    pub fn has_rutracker_credentials(&self) -> bool {
+        !self.rutracker_cookie.trim().is_empty()
+            || (!self.rutracker_username.trim().is_empty() && !self.rutracker_password.is_empty())
     }
 }
 

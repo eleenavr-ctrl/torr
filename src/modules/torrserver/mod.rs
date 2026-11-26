@@ -1,6 +1,7 @@
 pub mod api;
 pub mod clipboard;
 pub mod player;
+pub mod rutracker;
 pub mod server_manager;
 
 use crate::core;
@@ -15,6 +16,7 @@ use crate::modules::torrserver::player::{
     detect_installed_players, is_video_filename, launch_player, load_history, resolve_player_exe,
     save_history, upsert_history_watch, write_m3u_playlist, DetectedPlayer, HistoryRecord,
 };
+use crate::modules::torrserver::rutracker::{RuTrackerClient, RuTrackerPayload};
 use crate::modules::torrserver::server_manager::ServerManager;
 use crate::modules::{AppModule, ModuleInfo, ModuleStatus};
 use crate::{AppWindow, HistoryItem, SearchResultItem, TorrentFileItem, TorrentItem};
@@ -38,6 +40,8 @@ struct TorrServerShared {
     search_raw: Mutex<Vec<ApiSearchResult>>,
     search_quality: Mutex<String>,
     search_sort: Mutex<i32>,
+    search_source: Mutex<i32>,
+    rutracker: RuTrackerClient,
     detected_players: Mutex<Vec<DetectedPlayer>>,
     history: Mutex<Vec<HistoryRecord>>,
     last_status: Mutex<ModuleStatus>,
@@ -98,6 +102,8 @@ impl TorrServerModule {
             search_raw: Mutex::new(Vec::new()),
             search_quality: Mutex::new("ALL".to_string()),
             search_sort: Mutex::new(0),
+            search_source: Mutex::new(0),
+            rutracker: RuTrackerClient::new(),
             detected_players: Mutex::new(players),
             history: Mutex::new(history),
             last_status: Mutex::new(ModuleStatus::default()),
@@ -204,6 +210,16 @@ impl AppModule for TorrServerModule {
         ui.set_player_custom_path(cfg.player_custom_path.clone().into());
         ui.set_player_args(cfg.player_args.clone().into());
         ui.set_clipboard_watch(cfg.clipboard_watch);
+
+        ui.set_rt_enabled(cfg.rutracker_enabled);
+        ui.set_rt_mirror(cfg.rutracker_mirror.clone().into());
+        ui.set_rt_username(cfg.rutracker_username.clone().into());
+        ui.set_rt_password(cfg.rutracker_password.clone().into());
+        ui.set_rt_proxy(cfg.rutracker_proxy.clone().into());
+        ui.set_rt_cookie(cfg.rutracker_cookie.clone().into());
+        if cfg.rutracker_enabled && cfg.has_rutracker_credentials() {
+            ui.set_rt_auth_status("Учётные данные сохранены".into());
+        }
 
         sync_players_to_ui(&self.shared, ui);
         sync_history_to_ui(&self.shared, ui);
@@ -551,24 +567,12 @@ impl AppModule for TorrServerModule {
                 }
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
-                    let api = TorrServerApi::from_config(&s.ts_config());
-                    match api.search(&q) {
-                        Ok(results) => {
-                            if let Ok(mut raw) = s.search_raw.lock() {
-                                *raw = results;
-                            }
-                            push_search_to_ui(&s, "");
-                        }
-                        Err(e) => {
-                            diagnostics::error("[TS:API]", e.clone());
-                            push_search_to_ui(&s, &e);
-                        }
-                    }
+                    run_search(&s, &q);
                 });
             });
         }
 
-        // 14. Search filters & sort
+        // 14. Search filters, source & sort
         {
             let shared = Arc::clone(&self.shared);
             ui.on_set_search_quality(move |q| {
@@ -585,6 +589,27 @@ impl AppModule for TorrServerModule {
                     *guard = mode;
                 }
                 push_search_to_ui(&shared, "");
+            });
+        }
+        {
+            let shared = Arc::clone(&self.shared);
+            let weak = ui.as_weak();
+            ui.on_set_search_source(move |mode| {
+                if let Ok(mut guard) = shared.search_source.lock() {
+                    *guard = mode;
+                }
+                if let Some(app) = weak.upgrade() {
+                    app.set_search_source_mode(mode);
+                    let q = app.get_search_query().trim().to_string();
+                    if !q.is_empty() {
+                        app.set_search_loading(true);
+                        app.set_search_error("".into());
+                        let s = Arc::clone(&shared);
+                        thread::spawn(move || {
+                            run_search(&s, &q);
+                        });
+                    }
+                }
             });
         }
 
@@ -924,6 +949,67 @@ impl AppModule for TorrServerModule {
                 }
             });
         }
+
+        // 25. Save & test RuTracker auth
+        {
+            let shared = Arc::clone(&self.shared);
+            let weak = ui.as_weak();
+            ui.on_save_and_test_rutracker(move || {
+                if let Some(app) = weak.upgrade() {
+                    let enabled = app.get_rt_enabled();
+                    let mirror = app.get_rt_mirror().trim().to_string();
+                    let username = app.get_rt_username().trim().to_string();
+                    let password = app.get_rt_password().to_string();
+                    let proxy = app.get_rt_proxy().trim().to_string();
+                    let cookie = app.get_rt_cookie().trim().to_string();
+
+                    shared.update_ts_config(|c| {
+                        c.rutracker_enabled = enabled;
+                        c.rutracker_mirror = if mirror.is_empty() {
+                            "https://rutracker.org".to_string()
+                        } else {
+                            mirror
+                        };
+                        c.rutracker_username = username;
+                        c.rutracker_password = password;
+                        c.rutracker_proxy = proxy;
+                        c.rutracker_cookie = cookie;
+                    });
+
+                    app.set_rt_testing(true);
+                    app.set_rt_auth_status("Проверка авторизации...".into());
+
+                    let s = Arc::clone(&shared);
+                    thread::spawn(move || {
+                        let cfg = s.ts_config();
+                        let res = s.rutracker.verify_login(&cfg);
+                        if let Ok(guard) = s.ui_weak.lock() {
+                            if let Some(w) = guard.as_ref() {
+                                let w_c = w.clone();
+                                let (status_msg, ok) = match res {
+                                    Ok(msg) => (msg, true),
+                                    Err(e) => {
+                                        diagnostics::warn("[TS:RUTRACKER]", e.clone());
+                                        (e, false)
+                                    }
+                                };
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = w_c.upgrade() {
+                                        app.set_rt_testing(false);
+                                        app.set_rt_auth_status(status_msg.clone().into());
+                                        core::show_toast(&app, if ok {
+                                            "RuTracker: вход выполнен"
+                                        } else {
+                                            status_msg.as_str()
+                                        });
+                                    }
+                                });
+                            }
+                        }
+                    });
+                }
+            });
+        }
     }
 
     fn on_window_visibility_changed(&self, visible: bool) {
@@ -1065,8 +1151,23 @@ fn add_and_optionally_play(
     title: Option<&str>,
     auto_play: bool,
 ) {
-    let api = TorrServerApi::from_config(&shared.ts_config());
-    match api.add_magnet(link, title) {
+    let cfg = shared.ts_config();
+    let api = TorrServerApi::from_config(&cfg);
+
+    let result = if let Some(topic_id) = link.strip_prefix("rutracker://topic/") {
+        shared.toast("Загрузка торрента с RuTracker...");
+        match shared.rutracker.fetch_torrent_or_magnet(&cfg, topic_id) {
+            Ok(RuTrackerPayload::TorrentBytes { bytes, filename }) => {
+                api.upload_torrent_bytes(bytes, filename)
+            }
+            Ok(RuTrackerPayload::Magnet(magnet)) => api.add_magnet(&magnet, title),
+            Err(e) => Err(e),
+        }
+    } else {
+        api.add_magnet(link, title)
+    };
+
+    match result {
         Ok(t) => {
             let hash = t.hash.clone();
             let disp = t.display_title();
@@ -1419,6 +1520,85 @@ fn push_torrents_to_ui(shared: &Arc<TorrServerShared>) {
     }
 }
 
+fn run_search(shared: &Arc<TorrServerShared>, query: &str) {
+    let cfg = shared.ts_config();
+    let api = TorrServerApi::from_config(&cfg);
+    let source_mode = shared.search_source.lock().map(|m| *m).unwrap_or(0);
+
+    let mut combined: Vec<ApiSearchResult> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+
+    match source_mode {
+        // 1: Only RuTor
+        1 => match api.search_rutor(query) {
+            Ok(list) => combined = list,
+            Err(e) => notes.push(e),
+        },
+        // 2: Only RuTracker
+        2 => match shared.rutracker.search(&cfg, query) {
+            Ok(list) => combined = list,
+            Err(e) => notes.push(e),
+        },
+        // 3: Only JacRed
+        3 => match api.search_jacred(query) {
+            Ok(list) => combined = list,
+            Err(e) => notes.push(format!("JacRed: {e}")),
+        },
+        // 0: All enabled sources + JacRed fallback
+        _ => {
+            match api.search_rutor(query) {
+                Ok(mut list) => combined.append(&mut list),
+                Err(e) => notes.push(e),
+            }
+
+            if cfg.rutracker_enabled && cfg.has_rutracker_credentials() {
+                match shared.rutracker.search(&cfg, query) {
+                    Ok(mut rt_list) => combined.append(&mut rt_list),
+                    Err(e) => {
+                        diagnostics::warn("[TS:RUTRACKER]", e.clone());
+                        notes.push(format!("RuTracker: {e}"));
+                    }
+                }
+            }
+
+            if combined.is_empty() {
+                let reason = if notes.is_empty() {
+                    "источники вернули 0 результатов".to_string()
+                } else {
+                    notes.join("; ")
+                };
+                diagnostics::info(
+                    "[TS:API]",
+                    format!("{reason} — выполняется fallback-поиск JacRed"),
+                );
+                match api.search_jacred(query) {
+                    Ok(mut jr_list) => combined.append(&mut jr_list),
+                    Err(e) => notes.push(format!("JacRed: {e}")),
+                }
+            }
+        }
+    }
+
+    if !combined.is_empty() {
+        if let Ok(mut raw) = shared.search_raw.lock() {
+            *raw = combined;
+        }
+        push_search_to_ui(shared, "");
+    } else {
+        if let Ok(mut raw) = shared.search_raw.lock() {
+            raw.clear();
+        }
+        let err_text = if notes.is_empty() {
+            "По вашему запросу ничего не найдено".to_string()
+        } else {
+            let msg = format!("Поиск не дал результатов ({})", notes.join("; "));
+            diagnostics::error("[TS:API]", msg.clone());
+            msg
+        };
+        push_search_to_ui(shared, &err_text);
+    }
+}
+
 fn push_search_to_ui(shared: &Arc<TorrServerShared>, err_msg: &str) {
     let quality = shared
         .search_quality
@@ -1426,6 +1606,7 @@ fn push_search_to_ui(shared: &Arc<TorrServerShared>, err_msg: &str) {
         .map(|q| q.clone())
         .unwrap_or_else(|_| "ALL".to_string());
     let sort_mode = shared.search_sort.lock().map(|s| *s).unwrap_or(0);
+    let source_mode = shared.search_source.lock().map(|s| *s).unwrap_or(0);
     let raw = shared
         .search_raw
         .lock()
@@ -1478,6 +1659,7 @@ fn push_search_to_ui(shared: &Arc<TorrServerShared>, err_msg: &str) {
                     app.set_search_error(err_owned.into());
                     app.set_search_quality_filter(quality.into());
                     app.set_search_sort_mode(sort_mode);
+                    app.set_search_source_mode(source_mode);
                     app.set_search_results(ModelRc::from(Rc::new(VecModel::from(ui_items))));
                 }
             });
