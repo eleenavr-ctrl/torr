@@ -1,11 +1,32 @@
-<div align="center">
+# TorrServerUI
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Портативная модульная графическая оболочка и лаунчер для **TorrServer** под Windows 10/11 (x64) в стиле **Windows 11 Fluent Design**, написанная на **Rust + Slint UI**.
 
-  <h1>Built with AI Studio</h2>
+## Ключевые возможности
+- **100% портативность:** все настройки, история, кэш и бинарник движка хранятся строго рядом с `TorrServerUI.exe` в папке `./data/`. Никаких записей в реестр или `AppData` (кроме опционального ярлыка в Автозагрузке).
+- **Дизайн Windows 11:** светлая и тёмная темы в духе Mica, автоматическая перекраска заголовка окна (`DwmSetWindowAttribute`), боковая панель `NavigationView`, сворачиваемые карточки `SettingsExpander`, контекстные меню `PopupWindow`.
+- **Модульная архитектура:** ядро (`Core`) отделено от подключаемых модулей (`ModuleRegistry` + контракт `AppModule`). Первый встроенный модуль — `torrserver`.
+- **Управление движком:** скрытый локальный запуск (`CREATE_NO_WINDOW`), перехват вывода в реальном времени, удалённое подключение с HTTP Basic Auth, автообновление движка с GitHub (`YouROK/TorrServer`).
+- **Плееры и медиа:** автопоиск PotPlayer, MPV, VLC, MPC-BE/HC, прямой запуск потоков без браузера, генерация плейлистов `.m3u` для сериалов, история и отметка просмотренных серий.
+- **Поиск и удобство:** встроенный поиск RuTor + fallback на JacRed, фильтры качества (`1080p`, `4K`, `HDR`), перехват Magnet-ссылок из буфера обмена и Drag-and-Drop `.torrent`-файлов прямо в окно.
+- **Диагностика в реальном времени:** кольцевой буфер на 300 событий, проверка порта и ping API, понятные подсказки по причинам сбоев и кнопка **«Скопировать для ИИ»**.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Структура портативной папки `./data/`
+```text
+TorrServerUI.exe
+└── data/
+    ├── config.json                     # Конфигурация ядра и модулей
+    ├── modules/                        # Каталог для опциональных внешних .exe модулей
+    └── torrserver/
+        ├── TorrServer-windows-amd64.exe # Движок (скачивается в 1 клик)
+        ├── history.json                # История открытых раздач и просмотренных серий
+        ├── ts_cache/                   # Кеш TorrServer (если включён кеш на диске)
+        └── playlists/                  # Временные .m3u плейлисты сериалов
+```
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
-
-</div>
+## Сборка из исходников
+Требуется Rust toolchain для `x86_64-pc-windows-msvc` (OpenSSL не требуется — используется `rustls`):
+```powershell
+cargo build --release --target x86_64-pc-windows-msvc
+```
+Или используйте готовый workflow в `.github/workflows/build.yml` для автоматической сборки на GitHub Actions.

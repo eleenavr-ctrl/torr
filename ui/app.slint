@@ -1,0 +1,681 @@
+import { Palette, ComboBox, ScrollView, Switch } from "std-widgets.slint";
+import {
+    Theme,
+    TorrentItem,
+    TorrentFileItem,
+    SearchResultItem,
+    HistoryItem,
+    LogEntry,
+    ModuleListItem
+} from "theme.slint";
+import { FluentCard, FluentButton, FluentNavItem, SettingsExpander } from "components.slint";
+import { TorrentsView } from "modules/torrserver/torrents_view.slint";
+import { SearchView } from "modules/torrserver/search_view.slint";
+import { HistoryView } from "modules/torrserver/history_view.slint";
+import { TorrServerSettingsSection } from "modules/torrserver/settings_section.slint";
+
+export {
+    TorrentItem,
+    TorrentFileItem,
+    SearchResultItem,
+    HistoryItem,
+    LogEntry,
+    ModuleListItem
+}
+
+export component AppWindow inherits Window {
+    title: "TorrServerUI";
+    min-width: 960px;
+    min-height: 640px;
+    preferred-width: 1140px;
+    preferred-height: 760px;
+    background: Theme.window-bg;
+
+    in property <image> app-icon;
+    icon: root.app-icon;
+
+    // Navigation
+    in-out property <int> active-tab: 0; // 0 = Раздачи, 1 = Поиск, 2 = История, 3 = Настройки
+
+    // Bottom Status Bar
+    in-out property <bool> status-healthy: false;
+    in-out property <string> status-text: "Инициализация...";
+    in-out property <string> status-version: "";
+    in-out property <string> status-speed: "0 KB/s";
+    in-out property <int> status-active-count: 0;
+
+    // Toast
+    in-out property <string> toast-message: "";
+    in-out property <bool> toast-visible: false;
+
+    // Torrents View
+    in-out property <string> magnet-input: "";
+    in-out property <[TorrentItem]> torrents;
+    in-out property <string> selected-torrent-hash: "";
+    in-out property <string> selected-torrent-title: "";
+    in-out property <[TorrentFileItem]> selected-files;
+    in-out property <bool> only-video-files: true;
+    in-out property <bool> engine-missing: false;
+    in-out property <bool> engine-updating: false;
+    in-out property <string> engine-update-status: "";
+    in-out property <bool> is-remote-mode: false;
+
+    // Search View
+    in-out property <string> search-query: "";
+    in-out property <string> search-quality-filter: "ALL";
+    in-out property <int> search-sort-mode: 0;
+    in-out property <bool> search-loading: false;
+    in-out property <string> search-error: "";
+    in-out property <[SearchResultItem]> search-results;
+
+    // History View
+    in-out property <bool> history-only-favorites: false;
+    in-out property <[HistoryItem]> history-items;
+
+    // Settings: TorrServer
+    in-out property <int> ts-mode: 0;
+    in-out property <string> ts-port: "8090";
+    in-out property <string> ts-remote-url: "http://127.0.0.1:8090";
+    in-out property <string> ts-username: "";
+    in-out property <string> ts-password: "";
+    in-out property <string> ts-engine-version-text: "Не обнаружен";
+
+    in-out property <string> ts-cache-size-mb: "64";
+    in-out property <string> ts-preload-percent: "50";
+    in-out property <string> ts-read-ahead-percent: "95";
+    in-out property <string> ts-connections-limit: "25";
+    in-out property <bool> ts-use-disk: false;
+    in-out property <bool> ts-enable-ipv6: false;
+    in-out property <bool> ts-enable-dlna: false;
+    in-out property <bool> ts-enable-rutor: true;
+
+    in-out property <int> player-selected-idx: 0;
+    in-out property <[string]> player-presets;
+    in-out property <string> player-custom-path: "";
+    in-out property <string> player-args: "";
+    in-out property <bool> clipboard-watch: false;
+    in-out property <string> player-detect-status: "";
+
+    // Settings: Core & Modules
+    in-out property <int> theme-mode: 0;
+    in-out property <bool> autostart-enabled: false;
+    in-out property <[ModuleListItem]> registered-modules;
+
+    // Settings: Diagnostics
+    in-out property <bool> diag-expander-open: false;
+    in-out property <string> diag-app-version: "0.1.0";
+    in-out property <string> diag-engine-version: "-";
+    in-out property <string> diag-binary-status: "-";
+    in-out property <string> diag-port-status: "-";
+    in-out property <string> diag-api-ping: "-";
+    in-out property <string> diag-problem-hint: "Всё работает штатно";
+    in-out property <bool> diag-has-problem: false;
+    in-out property <[LogEntry]> diag-logs;
+
+    // Callbacks
+    callback add-magnet(string);
+    callback paste-and-add-magnet();
+    callback pick-torrent-file();
+    callback select-torrent(string);
+    callback refresh-torrents();
+    callback drop-torrent(string);
+    callback remove-torrent(string);
+    callback copy-torrent-magnet(string);
+    callback play-file(string, int);
+    callback play-all-m3u(string);
+    callback copy-stream-url(string, int);
+    callback toggle-only-video(bool);
+
+    callback search-torrents(string);
+    callback set-search-quality(string);
+    callback set-search-sort(int);
+    callback add-search-result(string, string);
+    callback play-search-result(string, string);
+
+    callback toggle-history-favorites(bool);
+    callback play-history-item(string, string);
+    callback toggle-history-favorite(string);
+    callback remove-history-item(string);
+
+    callback save-ts-connection-settings();
+    callback restart-ts-engine();
+    callback download-update-engine();
+    callback open-web-panel();
+    callback save-ts-cache-settings();
+    callback detect-players();
+    callback pick-player-exe();
+    callback save-player-settings();
+
+    callback change-theme-mode(int);
+    callback toggle-autostart(bool);
+    callback run-diagnostics-now();
+    callback copy-diagnostics-report();
+    callback copy-diagnostics-for-ai();
+    callback clear-diagnostics-logs();
+    callback open-diagnostics-tab();
+
+    public function apply-theme(mode: int, sys-dark: bool) {
+        Theme.mode = mode;
+        Theme.system-is-dark = sys-dark;
+        if (mode == 1) {
+            Palette.color-scheme = ColorScheme.light;
+        } else if (mode == 2) {
+            Palette.color-scheme = ColorScheme.dark;
+        } else {
+            Palette.color-scheme = sys-dark ? ColorScheme.dark : ColorScheme.light;
+        }
+    }
+
+    VerticalLayout {
+        // Main Workspace
+        HorizontalLayout {
+            vertical-stretch: 1;
+
+            // Left Windows 11 NavigationView (220px)
+            Rectangle {
+                width: 220px;
+                background: Theme.window-bg;
+
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 4px;
+
+                    // App Branding Header
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        padding-top: 6px;
+                        padding-bottom: 12px;
+                        spacing: 10px;
+                        Image {
+                            width: 24px;
+                            height: 24px;
+                            source: root.app-icon;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: "TorrServerUI";
+                                font-family: Theme.font-ui;
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: Theme.text-primary;
+                            }
+                            Text {
+                                text: "v" + root.diag-app-version + "  •  Portable";
+                                font-family: Theme.font-ui;
+                                font-size: 10px;
+                                color: Theme.text-secondary;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "  TORRSERVER";
+                        font-family: Theme.font-ui;
+                        font-size: 10px;
+                        font-weight: 600;
+                        color: Theme.text-secondary;
+                    }
+
+                    FluentNavItem {
+                        label: "Раздачи";
+                        icon-glyph: "⇵";
+                        active: root.active-tab == 0;
+                        clicked => { root.active-tab = 0; }
+                    }
+                    FluentNavItem {
+                        label: "Поиск";
+                        icon-glyph: "⌕";
+                        active: root.active-tab == 1;
+                        clicked => { root.active-tab = 1; }
+                    }
+                    FluentNavItem {
+                        label: "История";
+                        icon-glyph: "◷";
+                        active: root.active-tab == 2;
+                        clicked => { root.active-tab = 2; }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+
+                    Rectangle {
+                        height: 1px;
+                        background: Theme.border-color;
+                    }
+
+                    FluentNavItem {
+                        label: "Настройки";
+                        icon-glyph: "⚙";
+                        active: root.active-tab == 3;
+                        clicked => { root.active-tab = 3; }
+                    }
+                }
+            }
+
+            // Vertical divider
+            Rectangle {
+                width: 1px;
+                background: Theme.border-color;
+            }
+
+            // Content Area
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.window-bg;
+
+                if (root.active-tab == 0) : TorrentsView {
+                    magnet-input <=> root.magnet-input;
+                    torrents: root.torrents;
+                    selected-torrent-hash: root.selected-torrent-hash;
+                    selected-torrent-title: root.selected-torrent-title;
+                    selected-files: root.selected-files;
+                    only-video-files <=> root.only-video-files;
+                    engine-missing: root.engine-missing;
+                    engine-updating: root.engine-updating;
+                    engine-update-status: root.engine-update-status;
+                    is-remote-mode: root.is-remote-mode;
+
+                    add-magnet(m) => { root.add-magnet(m); }
+                    paste-and-add-magnet => { root.paste-and-add-magnet(); }
+                    pick-torrent-file => { root.pick-torrent-file(); }
+                    select-torrent(h) => { root.select-torrent(h); }
+                    refresh-torrents => { root.refresh-torrents(); }
+                    drop-torrent(h) => { root.drop-torrent(h); }
+                    remove-torrent(h) => { root.remove-torrent(h); }
+                    copy-torrent-magnet(h) => { root.copy-torrent-magnet(h); }
+                    play-file(h, fid) => { root.play-file(h, fid); }
+                    play-all-m3u(h) => { root.play-all-m3u(h); }
+                    copy-stream-url(h, fid) => { root.copy-stream-url(h, fid); }
+                    toggle-only-video(v) => { root.toggle-only-video(v); }
+                    download-update-engine => { root.download-update-engine(); }
+                }
+
+                if (root.active-tab == 1) : SearchView {
+                    search-query <=> root.search-query;
+                    quality-filter: root.search-quality-filter;
+                    sort-mode: root.search-sort-mode;
+                    loading: root.search-loading;
+                    error-text: root.search-error;
+                    results: root.search-results;
+
+                    search-torrents(q) => { root.search-torrents(q); }
+                    set-quality(q) => { root.set-search-quality(q); }
+                    set-sort(s) => { root.set-search-sort(s); }
+                    add-search-result(m, t) => { root.add-search-result(m, t); }
+                    play-search-result(m, t) => { root.play-search-result(m, t); }
+                }
+
+                if (root.active-tab == 2) : HistoryView {
+                    only-favorites <=> root.history-only-favorites;
+                    items: root.history-items;
+
+                    toggle-favorites-filter(v) => { root.toggle-history-favorites(v); }
+                    play-history-item(h, m) => { root.play-history-item(h, m); }
+                    toggle-favorite(h) => { root.toggle-history-favorite(h); }
+                    remove-history-item(h) => { root.remove-history-item(h); }
+                }
+
+                if (root.active-tab == 3) : sv-settings := ScrollView {
+                    VerticalLayout {
+                        width: sv-settings.visible-width;
+                        padding: 20px;
+                        spacing: 10px;
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            padding-bottom: 6px;
+                            Text {
+                                text: "Настройки";
+                                font-family: Theme.font-ui;
+                                font-size: 22px;
+                                font-weight: 600;
+                                color: Theme.text-primary;
+                            }
+                            Text {
+                                text: "Параметры ядра оболочки, подключённых модулей и диагностика";
+                                font-family: Theme.font-ui;
+                                font-size: 12px;
+                                color: Theme.text-secondary;
+                            }
+                        }
+
+                        // Module #1 Settings (3 accordions)
+                        TorrServerSettingsSection {
+                            ts-mode <=> root.ts-mode;
+                            ts-port <=> root.ts-port;
+                            ts-remote-url <=> root.ts-remote-url;
+                            ts-username <=> root.ts-username;
+                            ts-password <=> root.ts-password;
+                            ts-engine-version-text: root.ts-engine-version-text;
+                            engine-updating: root.engine-updating;
+                            engine-update-status: root.engine-update-status;
+
+                            ts-cache-size-mb <=> root.ts-cache-size-mb;
+                            ts-preload-percent <=> root.ts-preload-percent;
+                            ts-read-ahead-percent <=> root.ts-read-ahead-percent;
+                            ts-connections-limit <=> root.ts-connections-limit;
+                            ts-use-disk <=> root.ts-use-disk;
+                            ts-enable-ipv6 <=> root.ts-enable-ipv6;
+                            ts-enable-dlna <=> root.ts-enable-dlna;
+                            ts-enable-rutor <=> root.ts-enable-rutor;
+
+                            player-selected-idx <=> root.player-selected-idx;
+                            player-presets: root.player-presets;
+                            player-custom-path <=> root.player-custom-path;
+                            player-args <=> root.player-args;
+                            clipboard-watch <=> root.clipboard-watch;
+                            player-detect-status: root.player-detect-status;
+
+                            save-ts-connection-settings => { root.save-ts-connection-settings(); }
+                            restart-ts-engine => { root.restart-ts-engine(); }
+                            download-update-engine => { root.download-update-engine(); }
+                            open-web-panel => { root.open-web-panel(); }
+                            save-ts-cache-settings => { root.save-ts-cache-settings(); }
+                            detect-players => { root.detect-players(); }
+                            pick-player-exe => { root.pick-player-exe(); }
+                            save-player-settings => { root.save-player-settings(); }
+                        }
+
+                        // Core Settings Accordion #4
+                        SettingsExpander {
+                            title: "[Ядро] Интерфейс, система и подключённые модули";
+                            subtitle: "Тема Windows 11, автозапуск ярлыком и список активных модулей";
+                            icon-glyph: "⊞";
+
+                            HorizontalLayout {
+                                spacing: 12px;
+                                Text {
+                                    width: 180px;
+                                    text: "Тема оформления:";
+                                    font-family: Theme.font-ui;
+                                    font-size: 13px;
+                                    color: Theme.text-primary;
+                                    vertical-alignment: center;
+                                }
+                                ComboBox {
+                                    horizontal-stretch: 1;
+                                    model: ["Как в системе", "Светлая", "Тёмная"];
+                                    current-index <=> root.theme-mode;
+                                    selected => { root.change-theme-mode(self.current-index); }
+                                }
+                            }
+
+                            Switch {
+                                text: "Запускать TorrServerUI вместе с Windows (создаёт ярлык в папке Автозагрузки)";
+                                checked <=> root.autostart-enabled;
+                                toggled => { root.toggle-autostart(self.checked); }
+                            }
+
+                            Text {
+                                text: "Зарегистрированные модули:";
+                                font-family: Theme.font-ui;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: Theme.text-primary;
+                            }
+
+                            for m in root.registered-modules : Rectangle {
+                                border-radius: Theme.radius-ctrl;
+                                border-width: 1px;
+                                border-color: Theme.border-color;
+                                background: Theme.subtle-bg;
+                                HorizontalLayout {
+                                    padding: 10px;
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 2px;
+                                        Text {
+                                            text: m.name + "  (id: " + m.id + ", v" + m.version + ")";
+                                            font-family: Theme.font-ui;
+                                            font-size: 12px;
+                                            font-weight: 600;
+                                            color: Theme.text-primary;
+                                        }
+                                        Text {
+                                            text: m.description;
+                                            font-family: Theme.font-ui;
+                                            font-size: 11px;
+                                            color: Theme.text-secondary;
+                                        }
+                                    }
+                                    Text {
+                                        text: m.is-external ? "Внешний (.exe)" : (m.enabled ? m.status : "Отключён");
+                                        font-family: Theme.font-ui;
+                                        font-size: 11px;
+                                        color: Theme.accent;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Core Diagnostics Accordion #5
+                        SettingsExpander {
+                            title: "[Ядро] Версия и диагностика в реальном времени";
+                            subtitle: "Проверка порта, бинарника, ping API, журнал событий и отчёт для ИИ";
+                            icon-glyph: "🩺";
+                            expanded <=> root.diag-expander-open;
+
+                            // Status Summary Cards
+                            HorizontalLayout {
+                                spacing: 8px;
+                                FluentCard {
+                                    horizontal-stretch: 1;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        spacing: 2px;
+                                        Text { text: "Оболочка"; font-family: Theme.font-ui; font-size: 11px; color: Theme.text-secondary; }
+                                        Text { text: "v" + root.diag-app-version; font-family: Theme.font-ui; font-size: 13px; font-weight: 600; color: Theme.text-primary; }
+                                    }
+                                }
+                                FluentCard {
+                                    horizontal-stretch: 1;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        spacing: 2px;
+                                        Text { text: "Движок TorrServer"; font-family: Theme.font-ui; font-size: 11px; color: Theme.text-secondary; }
+                                        Text { text: root.diag-engine-version; font-family: Theme.font-ui; font-size: 13px; font-weight: 600; color: Theme.text-primary; overflow: elide; }
+                                    }
+                                }
+                                FluentCard {
+                                    horizontal-stretch: 1;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        spacing: 2px;
+                                        Text { text: "TCP-порт"; font-family: Theme.font-ui; font-size: 11px; color: Theme.text-secondary; }
+                                        Text { text: root.diag-port-status; font-family: Theme.font-ui; font-size: 12px; font-weight: 600; color: Theme.text-primary; overflow: elide; }
+                                    }
+                                }
+                                FluentCard {
+                                    horizontal-stretch: 1;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        spacing: 2px;
+                                        Text { text: "Ping API"; font-family: Theme.font-ui; font-size: 11px; color: Theme.text-secondary; }
+                                        Text { text: root.diag-api-ping; font-family: Theme.font-ui; font-size: 13px; font-weight: 600; color: Theme.text-primary; }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Файл движка: " + root.diag-binary-status;
+                                font-family: Theme.font-ui;
+                                font-size: 12px;
+                                color: Theme.text-secondary;
+                            }
+
+                            // Problem / Healthy Hint Banner
+                            Rectangle {
+                                border-radius: Theme.radius-ctrl;
+                                background: root.diag-has-problem ? Theme.danger-bg : Theme.info-bg;
+                                border-width: 1px;
+                                border-color: root.diag-has-problem ? Theme.danger : Theme.accent;
+                                HorizontalLayout {
+                                    padding: 10px;
+                                    Text {
+                                        text: root.diag-problem-hint;
+                                        font-family: Theme.font-ui;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.diag-has-problem ? Theme.danger : Theme.text-primary;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
+                            // Action Buttons
+                            HorizontalLayout {
+                                spacing: 8px;
+                                FluentButton {
+                                    text: "Проверить сейчас";
+                                    primary: true;
+                                    clicked => { root.run-diagnostics-now(); }
+                                }
+                                FluentButton {
+                                    text: "Скопировать отчёт";
+                                    clicked => { root.copy-diagnostics-report(); }
+                                }
+                                FluentButton {
+                                    text: "Скопировать для ИИ";
+                                    clicked => { root.copy-diagnostics-for-ai(); }
+                                }
+                                FluentButton {
+                                    text: "Очистить лог";
+                                    clicked => { root.clear-diagnostics-logs(); }
+                                }
+                            }
+
+                            // Live Console Log
+                            Rectangle {
+                                height: 220px;
+                                border-radius: Theme.radius-ctrl;
+                                background: Theme.log-bg;
+                                border-width: 1px;
+                                border-color: Theme.border-color;
+                                clip: true;
+
+                                sv-logs := ScrollView {
+                                    VerticalLayout {
+                                        width: sv-logs.visible-width;
+                                        padding: 8px;
+                                        spacing: 2px;
+
+                                        for entry in root.diag-logs : Text {
+                                            text: "[" + entry.timestamp + "] [" + entry.level + "] " + entry.tag + " " + entry.message;
+                                            font-family: Theme.font-mono;
+                                            font-size: 11px;
+                                            wrap: word-wrap;
+                                            color: entry.level == "ERROR"
+                                                ? Theme.danger
+                                                : (entry.level == "WARN" ? Theme.warning : Theme.text-primary);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Toast Notification
+                if (root.toast-visible) : Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: parent.height - 54px;
+                    width: 420px;
+                    height: 36px;
+                    border-radius: Theme.radius-card;
+                    background: Theme.card-bg;
+                    border-width: 1px;
+                    border-color: Theme.accent;
+                    drop-shadow-blur: 10px;
+                    drop-shadow-color: #00000033;
+
+                    Text {
+                        text: root.toast-message;
+                        font-family: Theme.font-ui;
+                        font-size: 12px;
+                        font-weight: 500;
+                        color: Theme.text-primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        // Bottom Status Bar
+        Rectangle {
+            height: 28px;
+            background: Theme.card-bg;
+            border-width: 1px;
+            border-color: Theme.border-color;
+
+            sb-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.open-diagnostics-tab(); }
+            }
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 14px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
+                            background: root.status-healthy ? Theme.success : Theme.danger;
+                        }
+                    }
+                    Text {
+                        text: root.status-text;
+                        font-family: Theme.font-ui;
+                        font-size: 11px;
+                        color: Theme.text-primary;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if (root.status-version != "") : Text {
+                    text: "TorrServer " + root.status-version;
+                    font-family: Theme.font-ui;
+                    font-size: 11px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "Скорость: " + root.status-speed;
+                    font-family: Theme.font-ui;
+                    font-size: 11px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "Раздач: " + root.status-active-count;
+                    font-family: Theme.font-ui;
+                    font-size: 11px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Text {
+                    text: "Нажмите для открытия диагностики";
+                    font-family: Theme.font-ui;
+                    font-size: 11px;
+                    color: sb-ta.has-hover ? Theme.accent : Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

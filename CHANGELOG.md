@@ -1,0 +1,27 @@
+# CHANGELOG.md — История изменений
+
+Все значимые изменения проекта документируются в этом файле.
+
+## [Unreleased]
+- Подготовка к расширению модульной системы (поддержка внешнего каталога `./data/modules/`).
+
+## [0.1.0] — 2026-11-26
+### Добавлено
+- **Ядро приложения (`src/core/`):**
+  - Двухслойная архитектура `Core` + `ModuleRegistry` с контрактом `AppModule`.
+  - Портативное хранение данных относительно `.exe` в `./data/config.json`, `./data/torrserver/`, `./data/modules/`.
+  - Светлая и тёмная темы Windows 11 (Mica-палитра), синхронизация заголовка окна через `DwmSetWindowAttribute` (`DWMWA_USE_IMMERSIVE_DARK_MODE`) и `Palette.color-scheme`.
+  - Программная генерация 32x32 RGBA-иконки приложения и системного трея без внешних файлов.
+  - Системный трей (`tray-icon` + `muda`) в выделенном Win32-потоке с меню ПКМ и сворачиванием при закрытии.
+  - Защита от повторного запуска через именованный Windows Mutex с разворачиванием существующего окна из трея.
+  - Шина диагностики в реальном времени (кольцевой буфер на 300 событий, проверка порта/бинарника/ping API, экспорт отчёта и Markdown-снимка для ИИ).
+- **Модуль №1 `torrserver` (`src/modules/torrserver/`):**
+  - Локальный скрытый запуск `TorrServer-windows-amd64.exe` (`CREATE_NO_WINDOW`), перехват `stdout`/`stderr`, штатная остановка через `/shutdown` + `kill()`.
+  - Удалённое подключение с поддержкой HTTP Basic Auth.
+  - Автообновлятор движка с GitHub Releases (`YouROK/TorrServer`) с обходом блокировки файла на Windows.
+  - Клиент TorrServer API (`/echo`, `/torrents`, `/torrent/upload`, `/settings`, `/search` + fallback на публичный API JacRed).
+  - Автопоиск видеоплееров (PotPlayer, MPV, VLC, MPC-BE/HC), ручной выбор `.exe`, генерация плейлистов `.m3u`, история просмотров `history.json` с избранным и отметкой серий.
+  - Опциональный перехват Magnet-ссылок из буфера обмена и Drag-and-Drop `.torrent`-файлов в окно.
+- **UI и CI:**
+  - Интерфейс Slint 1.9 (`fluent`) с боковой панелью `NavigationView`, вкладками *Раздачи*, *Поиск*, *История*, *Настройки* и контекстными меню `PopupWindow`.
+  - GitHub Actions workflow `.github/workflows/build.yml` для сборки `x86_64-pc-windows-msvc`.

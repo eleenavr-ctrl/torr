@@ -1,0 +1,96 @@
+export struct TorrentItem {
+    hash: string,
+    title: string,
+    size-text: string,
+    speed-text: string,
+    peers-text: string,
+    progress: float,
+    status-text: string,
+    magnet: string,
+    is-selected: bool,
+}
+
+export struct TorrentFileItem {
+    id: int,
+    index: int,
+    name: string,
+    path: string,
+    size-text: string,
+    stream-url: string,
+    is-video: bool,
+    is-watched: bool,
+}
+
+export struct SearchResultItem {
+    title: string,
+    magnet: string,
+    size-text: string,
+    size-bytes: float,
+    seeds: int,
+    peers: int,
+    quality: string,
+    tracker: string,
+}
+
+export struct HistoryItem {
+    hash: string,
+    title: string,
+    magnet: string,
+    last-opened: string,
+    watched-count: int,
+    total-files: int,
+    favorite: bool,
+}
+
+export struct LogEntry {
+    timestamp: string,
+    tag: string,
+    level: string,
+    message: string,
+}
+
+export struct ModuleListItem {
+    id: string,
+    name: string,
+    version: string,
+    description: string,
+    status: string,
+    enabled: bool,
+    is-external: bool,
+}
+
+export global Theme {
+    in-out property <int> mode: 0; // 0 = System, 1 = Light, 2 = Dark
+    in-out property <bool> system-is-dark: false;
+    out property <bool> is-dark: mode == 2 || (mode == 0 && system-is-dark);
+
+    // Windows 11 Mica-inspired palette
+    out property <color> window-bg: is-dark ? #202020 : #F3F3F3;
+    out property <color> card-bg: is-dark ? #2B2B2B : #FFFFFF;
+    out property <color> card-hover: is-dark ? #323232 : #F9F9F9;
+    out property <color> border-color: is-dark ? #383838 : #E5E5E5;
+    out property <color> text-primary: is-dark ? #FFFFFF : #1A1A1A;
+    out property <color> text-secondary: is-dark ? #CCCCCC : #5D5D5D;
+    out property <color> accent: is-dark ? #60CDFF : #0067C0;
+    out property <color> accent-hover: is-dark ? #77D5FF : #1975C5;
+    out property <color> accent-text: is-dark ? #000000 : #FFFFFF;
+
+    // Surface & semantic tokens
+    out property <color> nav-hover: is-dark ? #2D2D2D : #EAEAEA;
+    out property <color> nav-active: is-dark ? #333333 : #E7E7E7;
+    out property <color> subtle-bg: is-dark ? #252525 : #FAFAFA;
+    out property <color> input-bg: is-dark ? #2F2F2F : #FFFFFF;
+    out property <color> success: is-dark ? #6CCB5F : #0F7B0F;
+    out property <color> warning: is-dark ? #FCE100 : #9D5D00;
+    out property <color> danger: is-dark ? #FF99A4 : #C42B1C;
+    out property <color> danger-bg: is-dark ? #442726 : #FDE7E9;
+    out property <color> info-bg: is-dark ? #223544 : #EFF6FC;
+    out property <color> log-bg: is-dark ? #161616 : #F7F7F7;
+    out property <color> badge-bg: is-dark ? #3A3A3A : #EFEFEF;
+
+    // Typography & geometry
+    out property <string> font-ui: "Segoe UI Variable";
+    out property <string> font-mono: "Consolas";
+    out property <length> radius-card: 8px;
+    out property <length> radius-ctrl: 4px;
+}

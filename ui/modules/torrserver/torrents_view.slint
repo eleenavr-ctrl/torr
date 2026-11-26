@@ -1,0 +1,498 @@
+import { LineEdit, CheckBox, ScrollView } from "std-widgets.slint";
+import { Theme, TorrentItem, TorrentFileItem } from "../../theme.slint";
+import { FluentCard, FluentButton, FluentMenuItem } from "../../components.slint";
+
+export component TorrentsView inherits Rectangle {
+    in-out property <string> magnet-input: "";
+    in-out property <[TorrentItem]> torrents;
+    in-out property <string> selected-torrent-hash: "";
+    in-out property <string> selected-torrent-title: "";
+    in-out property <[TorrentFileItem]> selected-files;
+    in-out property <bool> only-video-files: true;
+    in-out property <bool> engine-missing: false;
+    in-out property <bool> engine-updating: false;
+    in-out property <string> engine-update-status: "";
+    in-out property <bool> is-remote-mode: false;
+
+    callback add-magnet(string);
+    callback paste-and-add-magnet();
+    callback pick-torrent-file();
+    callback select-torrent(string);
+    callback refresh-torrents();
+    callback drop-torrent(string);
+    callback remove-torrent(string);
+    callback copy-torrent-magnet(string);
+    callback play-file(string, int);
+    callback play-all-m3u(string);
+    callback copy-stream-url(string, int);
+    callback toggle-only-video(bool);
+    callback download-update-engine();
+
+    property <length> ctx-x: 0px;
+    property <length> ctx-y: 0px;
+    property <string> ctx-torrent-hash: "";
+    property <int> ctx-file-id: 0;
+
+    background: transparent;
+
+    torrent-ctx-menu := PopupWindow {
+        x: root.ctx-x;
+        y: root.ctx-y;
+        width: 230px;
+        height: 176px;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        Rectangle {
+            background: Theme.card-bg;
+            border-radius: Theme.radius-card;
+            border-width: 1px;
+            border-color: Theme.border-color;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: #00000040;
+
+            VerticalLayout {
+                padding: 4px;
+                spacing: 2px;
+
+                FluentMenuItem {
+                    text: "▶  Открыть в плеере";
+                    clicked => {
+                        torrent-ctx-menu.close();
+                        root.play-file(root.ctx-torrent-hash, -1);
+                    }
+                }
+                FluentMenuItem {
+                    text: "☰  Запустить все серии (.m3u)";
+                    clicked => {
+                        torrent-ctx-menu.close();
+                        root.play-all-m3u(root.ctx-torrent-hash);
+                    }
+                }
+                FluentMenuItem {
+                    text: "⧉  Копировать Magnet-ссылку";
+                    clicked => {
+                        torrent-ctx-menu.close();
+                        root.copy-torrent-magnet(root.ctx-torrent-hash);
+                    }
+                }
+                FluentMenuItem {
+                    text: "↺  Сбросить кеш (Drop)";
+                    clicked => {
+                        torrent-ctx-menu.close();
+                        root.drop-torrent(root.ctx-torrent-hash);
+                    }
+                }
+                FluentMenuItem {
+                    text: "✕  Удалить раздачу";
+                    danger: true;
+                    clicked => {
+                        torrent-ctx-menu.close();
+                        root.remove-torrent(root.ctx-torrent-hash);
+                    }
+                }
+            }
+        }
+    }
+
+    file-ctx-menu := PopupWindow {
+        x: root.ctx-x;
+        y: root.ctx-y;
+        width: 230px;
+        height: 110px;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        Rectangle {
+            background: Theme.card-bg;
+            border-radius: Theme.radius-card;
+            border-width: 1px;
+            border-color: Theme.border-color;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: #00000040;
+
+            VerticalLayout {
+                padding: 4px;
+                spacing: 2px;
+
+                FluentMenuItem {
+                    text: "▶  Открыть в плеере";
+                    clicked => {
+                        file-ctx-menu.close();
+                        root.play-file(root.selected-torrent-hash, root.ctx-file-id);
+                    }
+                }
+                FluentMenuItem {
+                    text: "⧉  Копировать прямую ссылку";
+                    clicked => {
+                        file-ctx-menu.close();
+                        root.copy-stream-url(root.selected-torrent-hash, root.ctx-file-id);
+                    }
+                }
+                FluentMenuItem {
+                    text: "☰  Запустить все серии (.m3u)";
+                    clicked => {
+                        file-ctx-menu.close();
+                        root.play-all-m3u(root.selected-torrent-hash);
+                    }
+                }
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 12px;
+
+        // Header
+        HorizontalLayout {
+            alignment: space-between;
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: "Раздачи";
+                    font-family: Theme.font-ui;
+                    font-size: 22px;
+                    font-weight: 600;
+                    color: Theme.text-primary;
+                }
+                Text {
+                    text: "Управление активными торрентами, файлами и прямым стримингом";
+                    font-family: Theme.font-ui;
+                    font-size: 12px;
+                    color: Theme.text-secondary;
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 8px;
+                FluentButton {
+                    text: "↻  Обновить";
+                    clicked => { root.refresh-torrents(); }
+                }
+            }
+        }
+
+        // Missing Engine Banner
+        if (root.engine-missing && !root.is-remote-mode) : Rectangle {
+            border-radius: Theme.radius-card;
+            background: Theme.info-bg;
+            border-width: 1px;
+            border-color: Theme.accent;
+
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 12px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    Text {
+                        text: "Движок TorrServer-windows-amd64.exe не найден в data/torrserver/";
+                        font-family: Theme.font-ui;
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: Theme.text-primary;
+                    }
+                    Text {
+                        text: root.engine-update-status != ""
+                            ? root.engine-update-status
+                            : "Нажмите кнопку справа, чтобы автоматически скачать последний релиз YouROK/TorrServer с GitHub.";
+                        font-family: Theme.font-ui;
+                        font-size: 12px;
+                        color: Theme.text-secondary;
+                        wrap: word-wrap;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    FluentButton {
+                        text: root.engine-updating ? "Скачивание..." : "⬇  Скачать движок";
+                        primary: true;
+                        enabled: !root.engine-updating;
+                        clicked => { root.download-update-engine(); }
+                    }
+                }
+            }
+        }
+
+        // Quick Add Card
+        FluentCard {
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        horizontal-stretch: 1;
+                        text <=> root.magnet-input;
+                        placeholder-text: "Вставьте Magnet-ссылку или перетащите .torrent-файл в окно...";
+                        accepted => {
+                            if (root.magnet-input != "") {
+                                root.add-magnet(root.magnet-input);
+                            }
+                        }
+                    }
+                    FluentButton {
+                        text: "Добавить";
+                        primary: true;
+                        clicked => {
+                            if (root.magnet-input != "") {
+                                root.add-magnet(root.magnet-input);
+                            }
+                        }
+                    }
+                    FluentButton {
+                        text: "Вставить";
+                        clicked => { root.paste-and-add-magnet(); }
+                    }
+                    FluentButton {
+                        text: ".torrent";
+                        clicked => { root.pick-torrent-file(); }
+                    }
+                }
+
+                Text {
+                    text: "Подсказка: поддерживается Drag-and-Drop .torrent файлов прямо в окно, а также ПКМ по раздаче или файлу.";
+                    font-family: Theme.font-ui;
+                    font-size: 11px;
+                    color: Theme.text-secondary;
+                }
+            }
+        }
+
+        // Torrents List
+        FluentCard {
+            vertical-stretch: 1;
+            clip: true;
+
+            if (root.torrents.length == 0) : VerticalLayout {
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: "Список раздач пуст";
+                    font-family: Theme.font-ui;
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: Theme.text-primary;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Добавьте Magnet-ссылку, выберите .torrent или перейдите на вкладку «Поиск»";
+                    font-family: Theme.font-ui;
+                    font-size: 12px;
+                    color: Theme.text-secondary;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if (root.torrents.length > 0) : sv-torrents := ScrollView {
+                VerticalLayout {
+                    width: sv-torrents.visible-width;
+                    padding: 8px;
+                    spacing: 6px;
+
+                    for item in root.torrents : Rectangle {
+                        border-radius: Theme.radius-ctrl;
+                        border-width: 1px;
+                        border-color: item.is-selected ? Theme.accent : Theme.border-color;
+                        background: item.is-selected
+                            ? Theme.info-bg
+                            : (row-ta.has-hover ? Theme.card-hover : Theme.subtle-bg);
+
+                        row-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            pointer-event(event) => {
+                                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                                    root.select-torrent(item.hash);
+                                }
+                                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                                    root.select-torrent(item.hash);
+                                    root.ctx-torrent-hash = item.hash;
+                                    root.ctx-x = min(self.absolute-position.x - root.absolute-position.x + self.mouse-x, max(0px, root.width - 236px));
+                                    root.ctx-y = min(self.absolute-position.y - root.absolute-position.y + self.mouse-y, max(0px, root.height - 182px));
+                                    torrent-ctx-menu.show();
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 6px;
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: item.title;
+                                    font-family: Theme.font-ui;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: Theme.text-primary;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: item.size-text;
+                                    font-family: Theme.font-ui;
+                                    font-size: 12px;
+                                    color: Theme.text-secondary;
+                                    vertical-alignment: center;
+                                }
+                                FluentButton {
+                                    text: "▶";
+                                    compact: true;
+                                    primary: true;
+                                    clicked => { root.play-file(item.hash, -1); }
+                                }
+                                FluentButton {
+                                    text: "✕";
+                                    compact: true;
+                                    danger: true;
+                                    clicked => { root.remove-torrent(item.hash); }
+                                }
+                            }
+
+                            // Progress Bar
+                            Rectangle {
+                                height: 4px;
+                                border-radius: 2px;
+                                background: Theme.border-color;
+                                Rectangle {
+                                    x: 0px;
+                                    y: 0px;
+                                    height: 4px;
+                                    border-radius: 2px;
+                                    width: parent.width * clamp(item.progress, 0.0, 1.0);
+                                    background: Theme.accent;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 16px;
+                                Text {
+                                    text: item.status-text;
+                                    font-family: Theme.font-ui;
+                                    font-size: 11px;
+                                    color: Theme.text-secondary;
+                                }
+                                Text {
+                                    text: "Скорость: " + item.speed-text;
+                                    font-family: Theme.font-ui;
+                                    font-size: 11px;
+                                    color: Theme.accent;
+                                }
+                                Text {
+                                    text: "Пиры/Сиды: " + item.peers-text;
+                                    font-family: Theme.font-ui;
+                                    font-size: 11px;
+                                    color: Theme.text-secondary;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Bottom Selected Torrent Files Panel
+        if (root.selected-torrent-hash != "") : FluentCard {
+            height: 230px;
+            clip: true;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text {
+                        horizontal-stretch: 1;
+                        text: "Файлы: " + root.selected-torrent-title;
+                        font-family: Theme.font-ui;
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: Theme.text-primary;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    CheckBox {
+                        text: "Только видео";
+                        checked <=> root.only-video-files;
+                        toggled => { root.toggle-only-video(self.checked); }
+                    }
+                    FluentButton {
+                        text: "☰  Плейлист сезона .m3u";
+                        compact: true;
+                        clicked => { root.play-all-m3u(root.selected-torrent-hash); }
+                    }
+                }
+
+                sv-files := ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        width: sv-files.visible-width;
+                        spacing: 4px;
+
+                        for f in root.selected-files : Rectangle {
+                            height: 36px;
+                            border-radius: Theme.radius-ctrl;
+                            background: f-ta.has-hover ? Theme.card-hover : Theme.subtle-bg;
+                            border-width: 1px;
+                            border-color: Theme.border-color;
+
+                            f-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                                        root.ctx-file-id = f.id;
+                                        root.ctx-x = min(self.absolute-position.x - root.absolute-position.x + self.mouse-x, max(0px, root.width - 236px));
+                                        root.ctx-y = min(self.absolute-position.y - root.absolute-position.y + self.mouse-y, max(0px, root.height - 118px));
+                                        file-ctx-menu.show();
+                                    }
+                                }
+                                double-clicked => {
+                                    root.play-file(root.selected-torrent-hash, f.id);
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 8px;
+
+                                Text {
+                                    text: f.is-watched ? "✓" : (f.is-video ? "🎬" : "📄");
+                                    font-family: Theme.font-ui;
+                                    font-size: 12px;
+                                    color: f.is-watched ? Theme.success : Theme.text-secondary;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: f.name;
+                                    font-family: Theme.font-ui;
+                                    font-size: 12px;
+                                    color: f.is-watched ? Theme.text-secondary : Theme.text-primary;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: f.size-text;
+                                    font-family: Theme.font-ui;
+                                    font-size: 11px;
+                                    color: Theme.text-secondary;
+                                    vertical-alignment: center;
+                                }
+                                FluentButton {
+                                    text: "▶ Смотреть";
+                                    compact: true;
+                                    primary: f.is-video;
+                                    clicked => { root.play-file(root.selected-torrent-hash, f.id); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

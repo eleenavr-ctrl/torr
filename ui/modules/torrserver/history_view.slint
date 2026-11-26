@@ -1,0 +1,148 @@
+import { CheckBox, ScrollView } from "std-widgets.slint";
+import { Theme, HistoryItem } from "../../theme.slint";
+import { FluentCard, FluentButton } from "../../components.slint";
+
+export component HistoryView inherits Rectangle {
+    in-out property <bool> only-favorites: false;
+    in-out property <[HistoryItem]> items;
+
+    callback toggle-favorites-filter(bool);
+    callback play-history-item(string, string);
+    callback toggle-favorite(string);
+    callback remove-history-item(string);
+
+    background: transparent;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            alignment: space-between;
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: "История";
+                    font-family: Theme.font-ui;
+                    font-size: 22px;
+                    font-weight: 600;
+                    color: Theme.text-primary;
+                }
+                Text {
+                    text: "Недавно открытые раздачи, отметки просмотренных серий и избранное";
+                    font-family: Theme.font-ui;
+                    font-size: 12px;
+                    color: Theme.text-secondary;
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                CheckBox {
+                    text: "★ Избранное";
+                    checked <=> root.only-favorites;
+                    toggled => { root.toggle-favorites-filter(self.checked); }
+                }
+            }
+        }
+
+        FluentCard {
+            vertical-stretch: 1;
+            clip: true;
+
+            if (root.items.length == 0) : VerticalLayout {
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: root.only-favorites ? "В избранном пока пусто" : "История просмотров пуста";
+                    font-family: Theme.font-ui;
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: Theme.text-primary;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Запустите фильм или сериал, чтобы запись сохранилась в data/torrserver/history.json";
+                    font-family: Theme.font-ui;
+                    font-size: 12px;
+                    color: Theme.text-secondary;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if (root.items.length > 0) : sv-hist := ScrollView {
+                VerticalLayout {
+                    width: sv-hist.visible-width;
+                    padding: 8px;
+                    spacing: 6px;
+
+                    for item in root.items : Rectangle {
+                        border-radius: Theme.radius-ctrl;
+                        border-width: 1px;
+                        border-color: Theme.border-color;
+                        background: h-ta.has-hover ? Theme.card-hover : Theme.subtle-bg;
+
+                        h-ta := TouchArea {
+                            mouse-cursor: default;
+                        }
+
+                        HorizontalLayout {
+                            padding: 10px;
+                            spacing: 10px;
+
+                            FluentButton {
+                                text: item.favorite ? "★" : "☆";
+                                compact: true;
+                                clicked => { root.toggle-favorite(item.hash); }
+                            }
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 3px;
+                                Text {
+                                    text: item.title;
+                                    font-family: Theme.font-ui;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: Theme.text-primary;
+                                    overflow: elide;
+                                }
+                                HorizontalLayout {
+                                    spacing: 14px;
+                                    Text {
+                                        text: "Открыто: " + item.last-opened;
+                                        font-family: Theme.font-ui;
+                                        font-size: 11px;
+                                        color: Theme.text-secondary;
+                                    }
+                                    Text {
+                                        text: "Просмотрено серий: " + item.watched-count + " / " + item.total-files;
+                                        font-family: Theme.font-ui;
+                                        font-size: 11px;
+                                        color: item.watched-count > 0 ? Theme.success : Theme.text-secondary;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 6px;
+                                FluentButton {
+                                    text: "▶ Открыть";
+                                    compact: true;
+                                    primary: true;
+                                    clicked => { root.play-history-item(item.hash, item.magnet); }
+                                }
+                                FluentButton {
+                                    text: "✕";
+                                    compact: true;
+                                    danger: true;
+                                    clicked => { root.remove-history-item(item.hash); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

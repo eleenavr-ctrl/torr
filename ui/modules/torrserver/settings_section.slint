@@ -1,0 +1,319 @@
+import { ComboBox, LineEdit, Switch } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { FluentButton, SettingsExpander } from "../../components.slint";
+
+export component TorrServerSettingsSection inherits VerticalLayout {
+    spacing: 10px;
+
+    // 1. Server & connection
+    in-out property <int> ts-mode: 0;
+    in-out property <string> ts-port: "8090";
+    in-out property <string> ts-remote-url: "http://127.0.0.1:8090";
+    in-out property <string> ts-username: "";
+    in-out property <string> ts-password: "";
+    in-out property <string> ts-engine-version-text: "Не обнаружен";
+    in-out property <bool> engine-updating: false;
+    in-out property <string> engine-update-status: "";
+
+    // 2. Cache & network
+    in-out property <string> ts-cache-size-mb: "64";
+    in-out property <string> ts-preload-percent: "50";
+    in-out property <string> ts-read-ahead-percent: "95";
+    in-out property <string> ts-connections-limit: "25";
+    in-out property <bool> ts-use-disk: false;
+    in-out property <bool> ts-enable-ipv6: false;
+    in-out property <bool> ts-enable-dlna: false;
+    in-out property <bool> ts-enable-rutor: true;
+
+    // 3. Players & clipboard
+    in-out property <int> player-selected-idx: 0;
+    in-out property <[string]> player-presets;
+    in-out property <string> player-custom-path: "";
+    in-out property <string> player-args: "";
+    in-out property <bool> clipboard-watch: false;
+    in-out property <string> player-detect-status: "";
+
+    callback save-ts-connection-settings();
+    callback restart-ts-engine();
+    callback download-update-engine();
+    callback open-web-panel();
+    callback save-ts-cache-settings();
+    callback detect-players();
+    callback pick-player-exe();
+    callback save-player-settings();
+
+    // Accordion 1: Server & Connection
+    SettingsExpander {
+        title: "[Модуль TorrServer] Сервер и подключение";
+        subtitle: "Локальный или удалённый режим, порт, авторизация и обновление движка";
+        icon-glyph: "⛁";
+        expanded: true;
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Режим работы:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: ["Локальный движок (data/torrserver)", "Удалённый сервер (URL)"];
+                current-index <=> root.ts-mode;
+            }
+        }
+
+        if (root.ts-mode == 0) : HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Локальный TCP-порт:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                width: 120px;
+                text <=> root.ts-port;
+                placeholder-text: "8090";
+            }
+            Text {
+                text: "Версия движка: " + root.ts-engine-version-text;
+                font-family: Theme.font-ui;
+                font-size: 12px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+            }
+        }
+
+        if (root.ts-mode == 1) : HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "URL удалённого сервера:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.ts-remote-url;
+                placeholder-text: "http://192.168.1.10:8090";
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "HTTP Basic Auth:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.ts-username;
+                placeholder-text: "Логин (опционально)";
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.ts-password;
+                input-type: InputType.password;
+                placeholder-text: "Пароль (опционально)";
+            }
+        }
+
+        if (root.engine-update-status != "") : Text {
+            text: root.engine-update-status;
+            font-family: Theme.font-ui;
+            font-size: 12px;
+            color: Theme.accent;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            FluentButton {
+                text: "Сохранить и применить";
+                primary: true;
+                clicked => { root.save-ts-connection-settings(); }
+            }
+            FluentButton {
+                text: "↻  Перезапустить движок";
+                clicked => { root.restart-ts-engine(); }
+            }
+            FluentButton {
+                text: root.engine-updating ? "Обновление..." : "⬇  Обновить с GitHub";
+                enabled: !root.engine-updating;
+                clicked => { root.download-update-engine(); }
+            }
+            FluentButton {
+                text: "🌐  Веб-панель";
+                clicked => { root.open-web-panel(); }
+            }
+        }
+    }
+
+    // Accordion 2: Cache & Network
+    SettingsExpander {
+        title: "[Модуль TorrServer] Параметры кеша и сети";
+        subtitle: "Размер буфера ОЗУ/диска, предзагрузка, лимит соединений, DLNA и RuTor";
+        icon-glyph: "⇄";
+
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 4px;
+                Text { text: "Размер кеша (МБ)"; font-family: Theme.font-ui; font-size: 12px; color: Theme.text-secondary; }
+                LineEdit { text <=> root.ts-cache-size-mb; }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 4px;
+                Text { text: "Предзагрузка (%)"; font-family: Theme.font-ui; font-size: 12px; color: Theme.text-secondary; }
+                LineEdit { text <=> root.ts-preload-percent; }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 4px;
+                Text { text: "Упреждение чтения (%)"; font-family: Theme.font-ui; font-size: 12px; color: Theme.text-secondary; }
+                LineEdit { text <=> root.ts-read-ahead-percent; }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 4px;
+                Text { text: "Лимит соединений"; font-family: Theme.font-ui; font-size: 12px; color: Theme.text-secondary; }
+                LineEdit { text <=> root.ts-connections-limit; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 24px;
+            VerticalLayout {
+                spacing: 8px;
+                Switch {
+                    text: "Использовать диск для кеша (ts_cache)";
+                    checked <=> root.ts-use-disk;
+                }
+                Switch {
+                    text: "Включить IPv6";
+                    checked <=> root.ts-enable-ipv6;
+                }
+            }
+            VerticalLayout {
+                spacing: 8px;
+                Switch {
+                    text: "Включить DLNA-сервер";
+                    checked <=> root.ts-enable-dlna;
+                }
+                Switch {
+                    text: "Встроенный поиск RuTor";
+                    checked <=> root.ts-enable-rutor;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            FluentButton {
+                text: "Применить параметры движка (/settings)";
+                primary: true;
+                clicked => { root.save-ts-cache-settings(); }
+            }
+        }
+    }
+
+    // Accordion 3: Players & Clipboard
+    SettingsExpander {
+        title: "[Модуль TorrServer] Видеоплееры и буфер";
+        subtitle: "Автопоиск PotPlayer / MPV / VLC / MPC, путь к .exe, перехват Magnet";
+        icon-glyph: "▶";
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Обнаруженный плеер:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: root.player-presets;
+                current-index <=> root.player-selected-idx;
+            }
+            FluentButton {
+                text: "Автопоиск";
+                clicked => { root.detect-players(); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Путь к плееру (.exe):";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.player-custom-path;
+                placeholder-text: "Оставьте пустым для использования выбранного выше плеера";
+            }
+            FluentButton {
+                text: "Обзор...";
+                clicked => { root.pick-player-exe(); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "Доп. аргументы:";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.player-args;
+                placeholder-text: "Например: --fullscreen";
+            }
+        }
+
+        Switch {
+            text: "Автоматически перехватывать скопированные magnet:?xt=... ссылки из буфера обмена";
+            checked <=> root.clipboard-watch;
+        }
+
+        if (root.player-detect-status != "") : Text {
+            text: root.player-detect-status;
+            font-family: Theme.font-ui;
+            font-size: 12px;
+            color: Theme.text-secondary;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            FluentButton {
+                text: "Сохранить настройки плеера";
+                primary: true;
+                clicked => { root.save-player-settings(); }
+            }
+        }
+    }
+}

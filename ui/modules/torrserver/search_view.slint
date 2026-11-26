@@ -1,0 +1,279 @@
+import { LineEdit, ScrollView } from "std-widgets.slint";
+import { Theme, SearchResultItem } from "../../theme.slint";
+import { FluentCard, FluentButton, FluentPill } from "../../components.slint";
+
+export component SearchView inherits Rectangle {
+    in-out property <string> search-query: "";
+    in-out property <string> quality-filter: "ALL";
+    in-out property <int> sort-mode: 0; // 0 = Seeds, 1 = Size
+    in-out property <bool> loading: false;
+    in-out property <string> error-text: "";
+    in-out property <[SearchResultItem]> results;
+
+    callback search-torrents(string);
+    callback set-quality(string);
+    callback set-sort(int);
+    callback add-search-result(string, string);
+    callback play-search-result(string, string);
+
+    background: transparent;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 12px;
+
+        // Header
+        VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: "Поиск раздач";
+                font-family: Theme.font-ui;
+                font-size: 22px;
+                font-weight: 600;
+                color: Theme.text-primary;
+            }
+            Text {
+                text: "Встроенный поиск по RuTor с резервным источником JacRed";
+                font-family: Theme.font-ui;
+                font-size: 12px;
+                color: Theme.text-secondary;
+            }
+        }
+
+        // Search Bar Card
+        FluentCard {
+            VerticalLayout {
+                padding: 12px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        horizontal-stretch: 1;
+                        text <=> root.search-query;
+                        placeholder-text: "Введите название фильма, сериала или аниме...";
+                        accepted => {
+                            if (root.search-query != "") {
+                                root.search-torrents(root.search-query);
+                            }
+                        }
+                    }
+                    FluentButton {
+                        text: root.loading ? "Поиск..." : "Найти";
+                        primary: true;
+                        enabled: !root.loading;
+                        clicked => {
+                            if (root.search-query != "") {
+                                root.search-torrents(root.search-query);
+                            }
+                        }
+                    }
+                }
+
+                // Quality pills & Sort
+                HorizontalLayout {
+                    alignment: space-between;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "Качество:";
+                            font-family: Theme.font-ui;
+                            font-size: 12px;
+                            color: Theme.text-secondary;
+                            vertical-alignment: center;
+                        }
+                        FluentPill {
+                            text: "Все";
+                            active: root.quality-filter == "ALL";
+                            clicked => { root.set-quality("ALL"); }
+                        }
+                        FluentPill {
+                            text: "1080p";
+                            active: root.quality-filter == "1080p";
+                            clicked => { root.set-quality("1080p"); }
+                        }
+                        FluentPill {
+                            text: "4K";
+                            active: root.quality-filter == "4K";
+                            clicked => { root.set-quality("4K"); }
+                        }
+                        FluentPill {
+                            text: "HDR";
+                            active: root.quality-filter == "HDR";
+                            clicked => { root.set-quality("HDR"); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "Сортировка:";
+                            font-family: Theme.font-ui;
+                            font-size: 12px;
+                            color: Theme.text-secondary;
+                            vertical-alignment: center;
+                        }
+                        FluentPill {
+                            text: "По сидам";
+                            active: root.sort-mode == 0;
+                            clicked => { root.set-sort(0); }
+                        }
+                        FluentPill {
+                            text: "По размеру";
+                            active: root.sort-mode == 1;
+                            clicked => { root.set-sort(1); }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (root.error-text != "") : Rectangle {
+            border-radius: Theme.radius-card;
+            background: Theme.danger-bg;
+            border-width: 1px;
+            border-color: Theme.danger;
+            HorizontalLayout {
+                padding: 10px;
+                Text {
+                    text: root.error-text;
+                    font-family: Theme.font-ui;
+                    font-size: 12px;
+                    color: Theme.danger;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        // Results Card
+        FluentCard {
+            vertical-stretch: 1;
+            clip: true;
+
+            if (root.results.length == 0) : VerticalLayout {
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: root.loading ? "Выполняется поиск по трекерам..." : "Нет результатов для отображения";
+                    font-family: Theme.font-ui;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Theme.text-primary;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Введите запрос в строку выше и нажмите «Найти»";
+                    font-family: Theme.font-ui;
+                    font-size: 12px;
+                    color: Theme.text-secondary;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if (root.results.length > 0) : sv-search := ScrollView {
+                VerticalLayout {
+                    width: sv-search.visible-width;
+                    padding: 8px;
+                    spacing: 6px;
+
+                    for res in root.results : Rectangle {
+                        border-radius: Theme.radius-ctrl;
+                        border-width: 1px;
+                        border-color: Theme.border-color;
+                        background: res-ta.has-hover ? Theme.card-hover : Theme.subtle-bg;
+
+                        res-ta := TouchArea {
+                            mouse-cursor: default;
+                        }
+
+                        HorizontalLayout {
+                            padding: 10px;
+                            spacing: 12px;
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 4px;
+
+                                Text {
+                                    text: res.title;
+                                    font-family: Theme.font-ui;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: Theme.text-primary;
+                                    overflow: elide;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    Rectangle {
+                                        height: 18px;
+                                        border-radius: 4px;
+                                        background: Theme.badge-bg;
+                                        HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            Text {
+                                                text: res.tracker;
+                                                font-family: Theme.font-ui;
+                                                font-size: 11px;
+                                                color: Theme.text-secondary;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    if (res.quality != "") : Rectangle {
+                                        height: 18px;
+                                        border-radius: 4px;
+                                        background: Theme.info-bg;
+                                        HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            Text {
+                                                text: res.quality;
+                                                font-family: Theme.font-ui;
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                color: Theme.accent;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: "Размер: " + res.size-text;
+                                        font-family: Theme.font-ui;
+                                        font-size: 11px;
+                                        color: Theme.text-secondary;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: "Сиды: " + res.seeds + "  |  Пиры: " + res.peers;
+                                        font-family: Theme.font-ui;
+                                        font-size: 11px;
+                                        color: res.seeds > 5 ? Theme.success : Theme.text-secondary;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 6px;
+                                FluentButton {
+                                    text: "+ В раздачи";
+                                    compact: true;
+                                    clicked => { root.add-search-result(res.magnet, res.title); }
+                                }
+                                FluentButton {
+                                    text: "▶ Смотреть";
+                                    compact: true;
+                                    primary: true;
+                                    clicked => { root.play-search-result(res.magnet, res.title); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

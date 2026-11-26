@@ -1,0 +1,277 @@
+import { Theme } from "theme.slint";
+
+export component FluentCard inherits Rectangle {
+    background: Theme.card-bg;
+    border-radius: Theme.radius-card;
+    border-width: 1px;
+    border-color: Theme.border-color;
+}
+
+export component FluentButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    in property <bool> compact: false;
+    callback clicked();
+
+    height: root.compact ? 28px : 32px;
+    min-width: root.compact ? 64px : 84px;
+    border-radius: Theme.radius-ctrl;
+    border-width: root.primary ? 0px : 1px;
+    border-color: root.danger ? Theme.danger : Theme.border-color;
+    background: !root.enabled
+        ? Theme.subtle-bg
+        : root.primary
+            ? (ta.pressed ? Theme.accent-hover : (ta.has-hover ? Theme.accent-hover : Theme.accent))
+            : root.danger
+                ? (ta.has-hover ? Theme.danger-bg : Theme.card-bg)
+                : (ta.pressed ? Theme.nav-active : (ta.has-hover ? Theme.card-hover : Theme.card-bg));
+
+    animate background { duration: 110ms; }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: root.compact ? 10px : 14px;
+        padding-right: root.compact ? 10px : 14px;
+        alignment: center;
+        Text {
+            text: root.text;
+            font-family: Theme.font-ui;
+            font-size: root.compact ? 12px : 13px;
+            font-weight: root.primary ? 600 : 500;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            color: !root.enabled
+                ? Theme.text-secondary
+                : root.primary
+                    ? Theme.accent-text
+                    : root.danger
+                        ? Theme.danger
+                        : Theme.text-primary;
+        }
+    }
+}
+
+export component FluentNavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon-glyph;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 36px;
+    border-radius: Theme.radius-ctrl;
+    background: root.active
+        ? Theme.nav-active
+        : (ta.has-hover ? Theme.nav-hover : transparent);
+
+    animate background { duration: 100ms; }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 10px;
+        spacing: 10px;
+        alignment: start;
+
+        // Windows 11 vertical accent indicator
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 3px;
+                height: 16px;
+                border-radius: 1.5px;
+                background: Theme.accent;
+                opacity: root.active ? 1.0 : 0.0;
+            }
+        }
+
+        Text {
+            text: root.icon-glyph;
+            font-family: Theme.font-ui;
+            font-size: 14px;
+            vertical-alignment: center;
+            width: 20px;
+            horizontal-alignment: center;
+            color: root.active ? Theme.accent : Theme.text-secondary;
+        }
+
+        Text {
+            text: root.label;
+            font-family: Theme.font-ui;
+            font-size: 13px;
+            font-weight: root.active ? 600 : 400;
+            vertical-alignment: center;
+            color: Theme.text-primary;
+        }
+    }
+}
+
+export component FluentPill inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 26px;
+    border-radius: 13px;
+    border-width: 1px;
+    border-color: root.active ? Theme.accent : Theme.border-color;
+    background: root.active
+        ? Theme.accent
+        : (ta.has-hover ? Theme.card-hover : Theme.card-bg);
+
+    animate background { duration: 100ms; }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        alignment: center;
+        Text {
+            text: root.text;
+            font-family: Theme.font-ui;
+            font-size: 12px;
+            font-weight: root.active ? 600 : 400;
+            vertical-alignment: center;
+            color: root.active ? Theme.accent-text : Theme.text-primary;
+        }
+    }
+}
+
+export component SettingsExpander inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> icon-glyph: "⚙";
+    in-out property <bool> expanded: false;
+
+    border-radius: Theme.radius-card;
+    background: Theme.card-bg;
+    border-width: 1px;
+    border-color: Theme.border-color;
+    clip: true;
+
+    VerticalLayout {
+        Rectangle {
+            height: 58px;
+            background: header-ta.has-hover ? Theme.card-hover : transparent;
+            animate background { duration: 100ms; }
+
+            header-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.expanded = !root.expanded; }
+            }
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 14px;
+
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 4px;
+                        background: Theme.subtle-bg;
+                        border-width: 1px;
+                        border-color: Theme.border-color;
+                        Text {
+                            text: root.icon-glyph;
+                            font-family: Theme.font-ui;
+                            font-size: 15px;
+                            color: Theme.accent;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.title;
+                        font-family: Theme.font-ui;
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text-primary;
+                    }
+                    Text {
+                        text: root.subtitle;
+                        font-family: Theme.font-ui;
+                        font-size: 12px;
+                        color: Theme.text-secondary;
+                        overflow: elide;
+                    }
+                }
+
+                Text {
+                    text: root.expanded ? "▾" : "▸";
+                    font-family: Theme.font-ui;
+                    font-size: 14px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: root.expanded ? 1px : 0px;
+            background: Theme.border-color;
+            visible: root.expanded;
+        }
+
+        body-box := Rectangle {
+            clip: true;
+            height: root.expanded ? body-layout.preferred-height : 0px;
+            visible: root.expanded;
+
+            body-layout := VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+                @children
+            }
+        }
+    }
+}
+
+export component FluentMenuItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> danger: false;
+    callback clicked();
+
+    height: 32px;
+    border-radius: Theme.radius-ctrl;
+    background: ta.has-hover ? (root.danger ? Theme.danger-bg : Theme.nav-hover) : transparent;
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        Text {
+            text: root.text;
+            font-family: Theme.font-ui;
+            font-size: 12px;
+            vertical-alignment: center;
+            color: root.danger ? Theme.danger : Theme.text-primary;
+        }
+    }
+}
