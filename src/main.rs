@@ -292,6 +292,20 @@ fn main() {
                         } else {
                             v.store(true, Ordering::Relaxed);
                             let _ = app.show();
+                            #[cfg(windows)]
+                            {
+                                use windows_sys::Win32::Foundation::HWND;
+                                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                                    SetForegroundWindow, ShowWindow, SW_RESTORE,
+                                };
+                                let h = extract_hwnd(app.window());
+                                if h != 0 {
+                                    unsafe {
+                                        ShowWindow(h as HWND, SW_RESTORE);
+                                        SetForegroundWindow(h as HWND);
+                                    }
+                                }
+                            }
                             if let Ok(guard) = r.lock() {
                                 guard.notify_visibility(true);
                             }
@@ -307,6 +321,20 @@ fn main() {
                     if let Some(app) = w.upgrade() {
                         v.store(true, Ordering::Relaxed);
                         let _ = app.show();
+                        #[cfg(windows)]
+                        {
+                            use windows_sys::Win32::Foundation::HWND;
+                            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                                SetForegroundWindow, ShowWindow, SW_RESTORE,
+                            };
+                            let h = extract_hwnd(app.window());
+                            if h != 0 {
+                                unsafe {
+                                    ShowWindow(h as HWND, SW_RESTORE);
+                                    SetForegroundWindow(h as HWND);
+                                }
+                            }
+                        }
                         if let Ok(guard) = r.lock() {
                             guard.notify_visibility(true);
                         }

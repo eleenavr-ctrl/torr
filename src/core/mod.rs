@@ -3,6 +3,7 @@ pub mod storage;
 pub mod tray;
 
 use crate::AppWindow;
+use slint::ComponentHandle;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -102,7 +103,7 @@ pub fn detect_windows_dark_mode() -> bool {
                 let status = RegQueryValueExW(
                     hkey,
                     value_name.as_ptr(),
-                    std::ptr::null_mut(),
+                    std::ptr::null(),
                     &mut reg_type,
                     &mut data as *mut u32 as *mut u8,
                     &mut size,
