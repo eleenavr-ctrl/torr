@@ -246,6 +246,36 @@ pub fn open_url_in_browser(url: &str) {
     }
 }
 
+pub fn apply_process_priority(above_normal: bool) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentProcess, SetPriorityClass, ABOVE_NORMAL_PRIORITY_CLASS,
+            NORMAL_PRIORITY_CLASS,
+        };
+        let class = if above_normal {
+            ABOVE_NORMAL_PRIORITY_CLASS
+        } else {
+            NORMAL_PRIORITY_CLASS
+        };
+        unsafe {
+            let _ = SetPriorityClass(GetCurrentProcess(), class);
+        }
+        diagnostics::info(
+            "[CORE]",
+            if above_normal {
+                "Приоритет процесса повышен (ABOVE_NORMAL — защита от выгрузки и троттлинга)"
+            } else {
+                "Приоритет процесса установлен в стандартный (NORMAL)"
+            },
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = above_normal;
+    }
+}
+
 pub fn show_toast(ui: &AppWindow, message: impl Into<String>) {
     let msg = message.into();
     ui.set_toast_message(msg.into());

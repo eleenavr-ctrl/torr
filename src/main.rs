@@ -230,6 +230,14 @@ fn main() {
     );
 
     let loaded_cfg = load_config(&paths);
+    let init_theme = loaded_cfg.core.theme_mode;
+    let init_start_minimized = loaded_cfg.core.start_minimized;
+    let init_keep_in_memory = loaded_cfg.core.keep_in_memory;
+    let cli_minimized = std::env::args().any(|a| a == "--minimized" || a == "-m");
+    let launch_minimized = cli_minimized || init_start_minimized;
+
+    core::apply_process_priority(init_keep_in_memory);
+
     let config = Arc::new(Mutex::new(loaded_cfg));
 
     // Initialize Module Registry and register Module #1: TorrServer
@@ -246,9 +254,10 @@ fn main() {
     let icon_rgba = core::generate_app_icon_rgba();
     app.set_app_icon(core::slint_app_icon(&icon_rgba));
 
-    let init_theme = config.lock().map(|c| c.core.theme_mode).unwrap_or(0);
     app.set_theme_mode(init_theme);
     app.set_autostart_enabled(core::is_autostart_enabled());
+    app.set_start_minimized(init_start_minimized);
+    app.set_keep_in_memory(init_keep_in_memory);
     app.set_diag_app_version(env!("CARGO_PKG_VERSION").into());
 
     if let Ok(r) = registry.lock() {
@@ -256,7 +265,7 @@ fn main() {
         app.set_registered_modules(ModelRc::from(Rc::new(VecModel::from(r.ui_module_list()))));
     }
 
-    let window_visible = Arc::new(AtomicBool::new(true));
+    let window_visible = Arc::new(AtomicBool::new(!launch_minimized));
     let _ = WIN32_HOOKS.set(Win32Hooks {
         ui_weak: app.as_weak(),
         registry: Arc::clone(&registry),
@@ -270,6 +279,24 @@ fn main() {
 
     #[cfg(windows)]
     install_win32_subclass(hwnd);
+
+    if launch_minimized {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Foundation::HWND;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+            if hwnd != 0 {
+                unsafe {
+                    ShowWindow(hwnd as HWND, SW_HIDE);
+                }
+            }
+        }
+        let _ = app.hide();
+        if let Ok(guard) = registry.lock() {
+            guard.notify_visibility(false);
+        }
+        diagnostics::info("[CORE]", "Запуск свёрнутым в системный трей");
+    }
 
     // Spawn Tray Icon thread
     let mut tray_handle = {
@@ -415,6 +442,59 @@ fn main() {
                         core::show_toast(&app, e);
                     }
                 }
+            }
+        });
+    }
+
+    {
+        let paths_c = paths.clone();
+        let cfg_c = Arc::clone(&config);
+        let weak = app.as_weak();
+        app.on_toggle_start_minimized(move |enabled| {
+            if let Ok(mut guard) = cfg_c.lock() {
+                guard.core.start_minimized = enabled;
+                let _ = save_config(&paths_c, &guard);
+            }
+            if let Some(app) = weak.upgrade() {
+                core::show_toast(
+                    &app,
+                    if enabled {
+                        "Программа будет автоматически сворачиваться в трей при запуске"
+                    } else {
+                        "Автоматическое сворачивание в трей отключено"
+                    },
+                );
+            }
+        });
+    }
+
+    {
+        let paths_c = paths.clone();
+        let cfg_c = Arc::clone(&config);
+        let reg_c = Arc::clone(&registry);
+        let weak = app.as_weak();
+        app.on_toggle_keep_in_memory(move |enabled| {
+            if let Ok(mut guard) = cfg_c.lock() {
+                guard.core.keep_in_memory = enabled;
+                let _ = save_config(&paths_c, &guard);
+            }
+            core::apply_process_priority(enabled);
+            if let Ok(reg) = reg_c.lock() {
+                reg.dispatch_action(if enabled {
+                    "priority_high"
+                } else {
+                    "priority_normal"
+                });
+            }
+            if let Some(app) = weak.upgrade() {
+                core::show_toast(
+                    &app,
+                    if enabled {
+                        "Удержание в ОЗУ и повышенный приоритет включены"
+                    } else {
+                        "Приоритет возвращён в стандартный режим"
+                    },
+                );
             }
         });
     }

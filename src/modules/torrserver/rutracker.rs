@@ -1,7 +1,7 @@
 use crate::core::diagnostics;
 use crate::core::storage::TorrServerConfig;
 use crate::modules::torrserver::api::{
-    detect_quality, format_bytes, parse_size_bytes, ApiSearchResult,
+    detect_quality, format_bytes, format_unix_date_short, parse_size_bytes, ApiSearchResult,
 };
 use crate::modules::torrserver::rutracker_webview::RuTrackerWebView;
 use encoding_rs::WINDOWS_1251;
@@ -88,8 +88,24 @@ impl RuTrackerClient {
     }
 
     pub fn search(&self, cfg: &TorrServerConfig, query: &str) -> Result<Vec<ApiSearchResult>, String> {
+        let encoded_q = encode_cp1251_query(query.trim());
+        let rel_path = format!("/forum/tracker.php?nm={encoded_q}&o=10&s=2");
+        self.search_tracker_path(cfg, &rel_path, &format!("по «{}»", query.trim()))
+    }
+
+    pub fn fetch_top_24h(&self, cfg: &TorrServerConfig) -> Result<Vec<ApiSearchResult>, String> {
+        // tm=1 filters topics added in the last 24 hours; o=10&s=2 sorts by seeders descending
+        self.search_tracker_path(cfg, "/forum/tracker.php?tm=1&o=10&s=2", "Топ 24ч")
+    }
+
+    fn search_tracker_path(
+        &self,
+        cfg: &TorrServerConfig,
+        rel_path: &str,
+        log_label: &str,
+    ) -> Result<Vec<ApiSearchResult>, String> {
         if cfg.rutracker_use_webview {
-            return self.webview.search(cfg, query);
+            return self.webview.search_tracker_path(cfg, rel_path, log_label);
         }
         if !cfg.has_rutracker_credentials() {
             return Err(
@@ -98,8 +114,7 @@ impl RuTrackerClient {
         }
 
         let base = cfg.effective_rutracker_mirror();
-        let encoded_q = encode_cp1251_query(query.trim());
-        let search_url = format!("{base}/forum/tracker.php?nm={encoded_q}&o=10&s=2");
+        let search_url = format!("{base}{rel_path}");
 
         let client = self.ensure_client(cfg, false)?;
         let mut html = self.get_text_cp1251(&client, cfg, &search_url)?;
@@ -120,7 +135,7 @@ impl RuTrackerClient {
         let results = parse_tracker_html(&html);
         diagnostics::info(
             "[TS:RUTRACKER]",
-            format!("Поиск RuTracker по «{}» вернул {} результатов", query.trim(), results.len()),
+            format!("Поиск RuTracker {log_label} вернул {} результатов", results.len()),
         );
         Ok(results)
     }
@@ -464,6 +479,7 @@ pub(crate) fn parse_tracker_html(html: &str) -> Vec<ApiSearchResult> {
             .or_else(|| extract_class_int(row_html, "leech"))
             .unwrap_or(0);
 
+        let (date_ts, date_text) = extract_topic_date(row_html);
         let quality = detect_quality(&title);
         results.push(ApiSearchResult {
             title,
@@ -474,6 +490,8 @@ pub(crate) fn parse_tracker_html(html: &str) -> Vec<ApiSearchResult> {
             peers,
             quality,
             tracker: "RuTracker".to_string(),
+            date_ts,
+            date_text,
         });
 
         if results.len() >= 80 {
@@ -562,6 +580,20 @@ fn extract_class_int(row_html: &str, class_name: &str) -> Option<i32> {
         .take_while(|c| c.is_ascii_digit())
         .collect();
     digits.parse::<i32>().ok()
+}
+
+fn extract_topic_date(row_html: &str) -> (i64, String) {
+    // The last data-ts_text attribute in a RuTracker search row holds the Unix timestamp of the added date
+    if let Some(pos) = row_html.rfind("data-ts_text=\"") {
+        let rest = &row_html[pos + "data-ts_text=\"".len()..];
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(ts) = digits.parse::<i64>() {
+            if ts > 900_000_000 {
+                return (ts, format_unix_date_short(ts));
+            }
+        }
+    }
+    (0, String::new())
 }
 
 pub(crate) fn extract_magnet_from_html(html: &str) -> Option<String> {

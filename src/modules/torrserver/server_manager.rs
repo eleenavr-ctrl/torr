@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 #[serde(default)]
 struct GitHubRelease {
     tag_name: String,
+    name: String,
     prerelease: bool,
     draft: bool,
     assets: Vec<GitHubAsset>,
@@ -26,6 +27,94 @@ struct GitHubRelease {
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MatrixReleaseOption {
+    pub tag: String,
+    pub label: String,
+    pub download_url: String,
+    pub prerelease: bool,
+}
+
+pub fn default_matrix_releases() -> Vec<MatrixReleaseOption> {
+    let tags = [
+        ("MatriX.141", "MatriX.141 (рекомендуемый стабильный)"),
+        ("MatriX.136", "MatriX.136"),
+        ("MatriX.135", "MatriX.135"),
+        ("MatriX.134", "MatriX.134"),
+        ("MatriX.133", "MatriX.133"),
+    ];
+    tags.into_iter()
+        .map(|(tag, label)| MatrixReleaseOption {
+            tag: tag.to_string(),
+            label: label.to_string(),
+            download_url: format!(
+                "https://github.com/YouROK/TorrServer/releases/download/{tag}/TorrServer-windows-amd64.exe"
+            ),
+            prerelease: false,
+        })
+        .collect()
+}
+
+pub fn fetch_available_matrix_releases() -> Result<Vec<MatrixReleaseOption>, String> {
+    let api_client = Client::builder()
+        .connect_timeout(Duration::from_secs(12))
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("Ошибка HTTP-клиента GitHub: {e}"))?;
+
+    let releases = api_client
+        .get("https://api.github.com/repos/YouROK/TorrServer/releases?per_page=35")
+        .header("User-Agent", "TorrServerUI/0.1.0")
+        .send()
+        .map_err(|e| format!("Ошибка запроса к GitHub API: {}", format_error_chain(&e)))?
+        .error_for_status()
+        .map_err(|e| format!("GitHub API вернул ошибку: {}", format_error_chain(&e)))?
+        .json::<Vec<GitHubRelease>>()
+        .map_err(|e| format!("Ошибка разбора релизов GitHub: {e}"))?;
+
+    let mut out = Vec::new();
+    let mut marked_latest_stable = false;
+    for r in releases {
+        if r.draft || !r.tag_name.to_lowercase().starts_with("matrix") {
+            continue;
+        }
+        if let Some(asset) = r
+            .assets
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case("TorrServer-windows-amd64.exe"))
+            .or_else(|| {
+                r.assets.iter().find(|a| {
+                    let low = a.name.to_lowercase();
+                    low.contains("windows")
+                        && low.contains("amd64")
+                        && low.ends_with(".exe")
+                        && !low.contains("gst")
+                })
+            })
+        {
+            let label = if r.prerelease {
+                format!("{} (pre-release)", r.tag_name)
+            } else if !marked_latest_stable {
+                marked_latest_stable = true;
+                format!("{} (последний стабильный)", r.tag_name)
+            } else {
+                r.tag_name.clone()
+            };
+            out.push(MatrixReleaseOption {
+                tag: r.tag_name,
+                label,
+                download_url: asset.browser_download_url.clone(),
+                prerelease: r.prerelease,
+            });
+        }
+    }
+
+    if out.is_empty() {
+        return Err("В релизах YouROK/TorrServer не найдено сборок MatriX для Windows x64".to_string());
+    }
+    Ok(out)
 }
 
 pub struct ServerManager {
@@ -45,7 +134,51 @@ impl ServerManager {
         self.paths.torrserver_exe.exists()
     }
 
-    pub fn start(&self, cfg: &TorrServerConfig) -> Result<(), String> {
+    /// Returns `Some(true)` if we own a running child, `Some(false)` if owned child exited,
+    /// `None` if no child was spawned or attached.
+    pub fn child_running_state(&self) -> Option<bool> {
+        let mut guard = self.child.lock().ok()?;
+        let ch = guard.as_mut()?;
+        match ch.try_wait() {
+            Ok(None) => Some(true),
+            Ok(Some(_)) | Err(_) => {
+                *guard = None;
+                Some(false)
+            }
+        }
+    }
+
+    pub fn apply_child_priority(&self, above_normal: bool) {
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Foundation::HANDLE;
+            use windows_sys::Win32::System::Threading::{
+                SetPriorityClass, ABOVE_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
+            };
+
+            if let Ok(mut guard) = self.child.lock() {
+                if let Some(ch) = guard.as_mut() {
+                    if let Ok(None) = ch.try_wait() {
+                        let class = if above_normal {
+                            ABOVE_NORMAL_PRIORITY_CLASS
+                        } else {
+                            NORMAL_PRIORITY_CLASS
+                        };
+                        unsafe {
+                            let _ = SetPriorityClass(ch.as_raw_handle() as HANDLE, class);
+                        }
+                    }
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = above_normal;
+        }
+    }
+
+    pub fn start(&self, cfg: &TorrServerConfig, high_priority: bool) -> Result<(), String> {
         if cfg.mode == 1 {
             diagnostics::info(
                 "[TS:ENGINE]",
@@ -73,6 +206,20 @@ impl ServerManager {
             }
         }
 
+        // If a compatible MatriX instance is already running on the configured port
+        // (e.g., kept alive via keep_engine_on_exit), reuse it cleanly instead of failing on port conflict.
+        let probe_api = TorrServerApi::from_config(cfg);
+        if let Ok((ver, _)) = probe_api.echo() {
+            diagnostics::info(
+                "[TS:ENGINE]",
+                format!(
+                    "Подключено к уже работающему TorrServer ({ver}) на порту {}",
+                    cfg.port
+                ),
+            );
+            return Ok(());
+        }
+
         let port_str = cfg.port.to_string();
         let cache_str = self.paths.ts_cache_dir.to_string_lossy().to_string();
         let use_yaml_mode = detect_yaml_config_mode(&self.paths.torrserver_exe);
@@ -90,7 +237,9 @@ impl ServerManager {
             cmd.env("TS_PORT", &port_str)
                 .env("TS_PATH", &cache_str);
         } else {
-            cmd.args(["--port", &port_str, "--path", &cache_str, "--rdb"]);
+            // IMPORTANT: Do NOT pass --rdb! In TorrServer MatriX, --rdb forces read-only DB mode,
+            // preventing added torrents and settings from persisting to config.db.
+            cmd.args(["--port", &port_str, "--path", &cache_str]);
         }
 
         cmd.current_dir(&self.paths.torrserver_dir)
@@ -100,8 +249,14 @@ impl ServerManager {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            let mut flags = 0x08000000u32; // CREATE_NO_WINDOW
+            if high_priority {
+                flags |= 0x00008000u32; // ABOVE_NORMAL_PRIORITY_CLASS
+            }
+            cmd.creation_flags(flags);
         }
+        #[cfg(not(windows))]
+        let _ = high_priority;
 
         let mut child = cmd
             .spawn()
@@ -143,7 +298,12 @@ impl ServerManager {
 
         diagnostics::info(
             "[TS:ENGINE]",
-            format!("Локальный движок запущен на порту {}", cfg.port),
+            format!(
+                "Локальный движок запущен на порту {} (БД: {}, приоритет: {})",
+                cfg.port,
+                self.paths.ts_cache_dir.display(),
+                if high_priority { "высокий" } else { "обычный" }
+            ),
         );
         Ok(())
     }
@@ -156,7 +316,7 @@ impl ServerManager {
 
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
-                for _ in 0..8 {
+                for _ in 0..10 {
                     if let Ok(Some(_)) = child.try_wait() {
                         diagnostics::info("[TS:ENGINE]", "Движок штатно остановлен");
                         return;
@@ -166,33 +326,60 @@ impl ServerManager {
                 let _ = child.kill();
                 let _ = child.wait();
                 diagnostics::warn("[TS:ENGINE]", "Движок принудительно завершён (kill)");
+                return;
+            }
+        }
+
+        // Wait briefly in case an external/reattached local TorrServer is shutting down from /shutdown
+        if cfg.mode == 0 {
+            let api = TorrServerApi::from_config(cfg);
+            for _ in 0..8 {
+                if api.echo().is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(120));
             }
         }
     }
 
-    pub fn restart(&self, cfg: &TorrServerConfig) -> Result<(), String> {
+    pub fn restart(&self, cfg: &TorrServerConfig, high_priority: bool) -> Result<(), String> {
         diagnostics::info("[TS:ENGINE]", "Перезапуск TorrServer...");
         self.stop(cfg);
         thread::sleep(Duration::from_millis(250));
-        self.start(cfg)
+        self.start(cfg, high_priority)
     }
 
     pub fn update_from_github<F>(
         &self,
         cfg: &TorrServerConfig,
+        high_priority: bool,
+        target_tag: Option<&str>,
+        known_releases: &[MatrixReleaseOption],
         on_progress: F,
     ) -> Result<String, String>
     where
         F: Fn(&str, f32),
     {
-        on_progress("Стадия 1/4: поиск совместимого релиза MatriX на GitHub...", 0.02);
-        diagnostics::info("[TS:UPDATER]", "Поиск актуального релиза MatriX в YouROK/TorrServer");
+        let requested_tag = target_tag
+            .map(str::trim)
+            .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("auto"));
 
-        let api_client = Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|e| format!("Ошибка HTTP-клиента: {e}"))?;
+        if let Some(tag) = requested_tag {
+            on_progress(&format!("Стадия 1/4: подготовка версии {tag}..."), 0.02);
+            diagnostics::info(
+                "[TS:UPDATER]",
+                format!("Выбрана установка конкретной версии MatriX: {tag}"),
+            );
+        } else {
+            on_progress(
+                "Стадия 1/4: поиск актуального релиза MatriX на GitHub...",
+                0.02,
+            );
+            diagnostics::info(
+                "[TS:UPDATER]",
+                "Поиск актуального релиза MatriX в YouROK/TorrServer",
+            );
+        }
 
         let dl_client = Client::builder()
             .connect_timeout(Duration::from_secs(20))
@@ -200,36 +387,44 @@ impl ServerManager {
             .build()
             .map_err(|e| format!("Ошибка HTTP-клиента загрузки: {e}"))?;
 
-        let (tag_name, download_url) = match api_client
-            .get("https://api.github.com/repos/YouROK/TorrServer/releases?per_page=25")
-            .header("User-Agent", "TorrServerUI/0.1.0")
-            .send()
-            .and_then(|r| r.error_for_status())
-            .and_then(|r| r.json::<Vec<GitHubRelease>>())
-        {
-            Ok(releases) => {
-                if let Some((tag, url)) = select_compatible_matrix_release(&releases) {
-                    (tag, url)
-                } else {
+        let (tag_name, download_url) = if let Some(tag) = requested_tag {
+            if let Some(found) = known_releases.iter().find(|r| r.tag == tag) {
+                (found.tag.clone(), found.download_url.clone())
+            } else {
+                (
+                    tag.to_string(),
+                    format!(
+                        "https://github.com/YouROK/TorrServer/releases/download/{tag}/TorrServer-windows-amd64.exe"
+                    ),
+                )
+            }
+        } else {
+            let fetched = fetch_available_matrix_releases();
+            match fetched {
+                Ok(list) => {
+                    if let Some(best) = list
+                        .iter()
+                        .find(|r| !r.prerelease)
+                        .or_else(|| list.first())
+                    {
+                        (best.tag.clone(), best.download_url.clone())
+                    } else {
+                        (
+                            "MatriX.141".to_string(),
+                            "https://github.com/YouROK/TorrServer/releases/download/MatriX.141/TorrServer-windows-amd64.exe".to_string(),
+                        )
+                    }
+                }
+                Err(e) => {
                     diagnostics::warn(
                         "[TS:UPDATER]",
-                        "Релиз MatriX не найден в списке API — пробуем MatriX.141 / MatriX.135 напрямую",
+                        format!("{e} — используем резервную ссылку MatriX.141"),
                     );
                     (
                         "MatriX.141".to_string(),
                         "https://github.com/YouROK/TorrServer/releases/download/MatriX.141/TorrServer-windows-amd64.exe".to_string(),
                     )
                 }
-            }
-            Err(e) => {
-                diagnostics::warn(
-                    "[TS:UPDATER]",
-                    format!("GitHub API недоступен ({}) — пробуем прямую ссылку MatriX.141", format_error_chain(&e)),
-                );
-                (
-                    "MatriX.141".to_string(),
-                    "https://github.com/YouROK/TorrServer/releases/download/MatriX.141/TorrServer-windows-amd64.exe".to_string(),
-                )
             }
         };
 
@@ -251,7 +446,9 @@ impl ServerManager {
             );
             diagnostics::info(
                 "[TS:UPDATER]",
-                format!("Скачивание ({tag_name}, попытка {attempt}/{max_attempts}): {download_url}"),
+                format!(
+                    "Скачивание ({tag_name}, попытка {attempt}/{max_attempts}): {download_url}"
+                ),
             );
 
             match stream_download_exe(&dl_client, &download_url, &new_path, &tag_name, &on_progress) {
@@ -302,7 +499,7 @@ impl ServerManager {
 
         if cfg.mode == 0 {
             on_progress("Стадия 4/4: запуск TorrServer...", 0.99);
-            self.start(cfg)?;
+            self.start(cfg, high_priority)?;
         }
 
         on_progress(&format!("Готово: установлен TorrServer {tag_name}"), 1.0);
@@ -313,6 +510,7 @@ impl ServerManager {
         &self,
         cfg: &TorrServerConfig,
         source_path: &Path,
+        high_priority: bool,
     ) -> Result<(), String> {
         if !source_path.exists() {
             return Err(format!("Файл не найден: {}", source_path.display()));
@@ -329,7 +527,7 @@ impl ServerManager {
             format!("Установлен локальный бинарник из {}", source_path.display()),
         );
         if cfg.mode == 0 {
-            self.start(cfg)?;
+            self.start(cfg, high_priority)?;
         }
         Ok(())
     }
@@ -443,38 +641,6 @@ where
         0.95,
     );
     Ok(())
-}
-
-fn select_compatible_matrix_release(releases: &[GitHubRelease]) -> Option<(String, String)> {
-    let find_in = |allow_prerelease: bool| -> Option<(String, String)> {
-        for r in releases {
-            if r.draft || (!allow_prerelease && r.prerelease) {
-                continue;
-            }
-            if !r.tag_name.to_lowercase().starts_with("matrix") {
-                continue;
-            }
-            if let Some(asset) = r
-                .assets
-                .iter()
-                .find(|a| a.name.eq_ignore_ascii_case("TorrServer-windows-amd64.exe"))
-                .or_else(|| {
-                    r.assets.iter().find(|a| {
-                        let low = a.name.to_lowercase();
-                        low.contains("windows")
-                            && low.contains("amd64")
-                            && low.ends_with(".exe")
-                            && !low.contains("gst")
-                    })
-                })
-            {
-                return Some((r.tag_name.clone(), asset.browser_download_url.clone()));
-            }
-        }
-        None
-    };
-
-    find_in(false).or_else(|| find_in(true))
 }
 
 fn detect_yaml_config_mode(exe_path: &Path) -> bool {

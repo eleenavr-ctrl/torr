@@ -5,13 +5,14 @@ import { FluentCard, FluentButton, FluentPill } from "../../components.slint";
 export component SearchView inherits Rectangle {
     in-out property <string> search-query: "";
     in-out property <string> quality-filter: "ALL";
-    in-out property <int> sort-mode: 0; // 0 = Seeds, 1 = Size
+    in-out property <int> sort-mode: 0; // 0 = Seeds, 1 = Date, 2 = Size, 3 = Title
     in-out property <int> source-mode: 0; // 0 = All, 1 = RuTor, 2 = RuTracker, 3 = JacRed
     in-out property <bool> loading: false;
     in-out property <string> error-text: "";
     in-out property <[SearchResultItem]> results;
 
     callback search-torrents(string);
+    callback fetch-top-24h();
     callback set-quality(string);
     callback set-sort(int);
     callback set-source(int);
@@ -69,6 +70,11 @@ export component SearchView inherits Rectangle {
                                 root.search-torrents(root.search-query);
                             }
                         }
+                    }
+                    FluentButton {
+                        text: "🔥 Топ 24ч";
+                        enabled: !root.loading;
+                        clicked => { root.fetch-top-24h(); }
                     }
                 }
 
@@ -153,9 +159,19 @@ export component SearchView inherits Rectangle {
                             clicked => { root.set-sort(0); }
                         }
                         FluentPill {
-                            text: "По размеру";
+                            text: "По дате";
                             active: root.sort-mode == 1;
                             clicked => { root.set-sort(1); }
+                        }
+                        FluentPill {
+                            text: "По размеру";
+                            active: root.sort-mode == 2;
+                            clicked => { root.set-sort(2); }
+                        }
+                        FluentPill {
+                            text: "По названию";
+                            active: root.sort-mode == 3;
+                            clicked => { root.set-sort(3); }
                         }
                     }
                 }
@@ -186,9 +202,9 @@ export component SearchView inherits Rectangle {
 
             if (root.results.length == 0) : VerticalLayout {
                 alignment: center;
-                spacing: 6px;
+                spacing: 8px;
                 Text {
-                    text: root.loading ? "Выполняется поиск по трекерам..." : "Нет результатов для отображения";
+                    text: root.loading ? "Выполняется загрузка раздач с трекеров..." : "Нет результатов для отображения";
                     font-family: Theme.font-ui;
                     font-size: 14px;
                     font-weight: 600;
@@ -196,11 +212,19 @@ export component SearchView inherits Rectangle {
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: "Введите запрос в строку выше и нажмите «Найти»";
+                    text: "Введите запрос в строку выше и нажмите «Найти» или откройте популярные раздачи";
                     font-family: Theme.font-ui;
                     font-size: 12px;
                     color: Theme.text-secondary;
                     horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    FluentButton {
+                        text: "🔥 Показать популярное за 24 часа";
+                        enabled: !root.loading;
+                        clicked => { root.fetch-top-24h(); }
+                    }
                 }
             }
 
@@ -274,6 +298,13 @@ export component SearchView inherits Rectangle {
                                     }
                                     Text {
                                         text: "Размер: " + res.size-text;
+                                        font-family: Theme.font-ui;
+                                        font-size: 11px;
+                                        color: Theme.text-secondary;
+                                        vertical-alignment: center;
+                                    }
+                                    if (res.date-text != "") : Text {
+                                        text: res.date-text;
                                         font-family: Theme.font-ui;
                                         font-size: 11px;
                                         color: Theme.text-secondary;

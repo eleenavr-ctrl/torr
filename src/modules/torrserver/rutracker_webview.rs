@@ -2,8 +2,7 @@ use crate::core::diagnostics;
 use crate::core::storage::TorrServerConfig;
 use crate::modules::torrserver::api::ApiSearchResult;
 use crate::modules::torrserver::rutracker::{
-    encode_cp1251_query, extract_magnet_from_html, looks_like_login_page, parse_tracker_html,
-    RuTrackerPayload,
+    extract_magnet_from_html, looks_like_login_page, parse_tracker_html, RuTrackerPayload,
 };
 use std::path::PathBuf;
 
@@ -366,14 +365,13 @@ mod win_impl {
             Err("Вы не авторизованы в встроенном браузере: войдите в открывшемся окне RuTracker и нажмите «Сохранить и проверить вход» ещё раз.".to_string())
         }
 
-        pub fn search(
+        pub fn search_tracker_path(
             &self,
             cfg: &TorrServerConfig,
-            query: &str,
+            rel_path: &str,
+            log_label: &str,
         ) -> Result<Vec<ApiSearchResult>, String> {
             let base = cfg.effective_rutracker_mirror();
-            let encoded_q = encode_cp1251_query(query.trim());
-            let rel_path = format!("/forum/tracker.php?nm={encoded_q}&o=10&s=2");
             let full_url = format!("{base}{rel_path}");
             let init_cfg = make_init_cfg(cfg);
 
@@ -381,7 +379,7 @@ mod win_impl {
             let cur_url = self.current_url().unwrap_or_default();
             if cur_url.starts_with(&base) {
                 let req_id = self.next_id()?;
-                let rel_json = serde_json::to_string(&rel_path)
+                let rel_json = serde_json::to_string(rel_path)
                     .map_err(|e| format!("Ошибка сериализации URL: {e}"))?;
                 let js = format!(
                     r#"(async function(){{
@@ -408,8 +406,7 @@ mod win_impl {
                         diagnostics::info(
                             "[TS:RUTRACKER]",
                             format!(
-                                "Поиск RuTracker (WebView2) по «{}» вернул {} результатов",
-                                query.trim(),
+                                "Поиск RuTracker (WebView2) {log_label} вернул {} результатов",
                                 results.len()
                             ),
                         );
@@ -460,8 +457,7 @@ mod win_impl {
             diagnostics::info(
                 "[TS:RUTRACKER]",
                 format!(
-                    "Поиск RuTracker (WebView2) по «{}» вернул {} результатов",
-                    query.trim(),
+                    "Поиск RuTracker (WebView2) {log_label} вернул {} результатов",
                     results.len()
                 ),
             );
@@ -1377,10 +1373,11 @@ mod non_win_impl {
             Err("Встроенный браузер WebView2 поддерживается только на Windows".to_string())
         }
 
-        pub fn search(
+        pub fn search_tracker_path(
             &self,
             _cfg: &TorrServerConfig,
-            _query: &str,
+            _rel_path: &str,
+            _log_label: &str,
         ) -> Result<Vec<ApiSearchResult>, String> {
             Err("Встроенный браузер WebView2 поддерживается только на Windows".to_string())
         }

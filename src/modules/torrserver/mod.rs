@@ -9,8 +9,8 @@ use crate::core;
 use crate::core::diagnostics;
 use crate::core::storage::{save_config, AppConfig, PortablePaths, TorrServerConfig};
 use crate::modules::torrserver::api::{
-    format_bytes, format_speed, parse_backup_json, ApiSearchResult, ApiTorrent, TorrServerApi,
-    TorrServerEngineSettings,
+    format_bytes, format_speed, format_unix_datetime_short, parse_backup_json, ApiSearchResult,
+    ApiTorrent, TorrServerApi, TorrServerEngineSettings,
 };
 use crate::modules::torrserver::clipboard::ClipboardWatcher;
 use crate::modules::torrserver::player::{
@@ -18,16 +18,20 @@ use crate::modules::torrserver::player::{
     save_history, upsert_history_watch, write_m3u_playlist, DetectedPlayer, HistoryRecord,
 };
 use crate::modules::torrserver::rutracker::{RuTrackerClient, RuTrackerPayload};
-use crate::modules::torrserver::server_manager::ServerManager;
+use crate::modules::torrserver::server_manager::{
+    default_matrix_releases, fetch_available_matrix_releases, MatrixReleaseOption, ServerManager,
+};
 use crate::modules::{AppModule, ModuleInfo, ModuleStatus};
 use crate::{AppWindow, HistoryItem, SearchResultItem, TorrentFileItem, TorrentItem};
+use chrono::Utc;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 struct TorrServerShared {
     paths: PortablePaths,
@@ -36,7 +40,9 @@ struct TorrServerShared {
     ui_weak: Mutex<Option<slint::Weak<AppWindow>>>,
     window_visible: Arc<AtomicBool>,
     poll_stop: Arc<AtomicBool>,
+    engine_updating: Arc<AtomicBool>,
     cached_torrents: Mutex<Vec<ApiTorrent>>,
+    torrents_meta: Mutex<HashMap<String, i64>>,
     selected_hash: Mutex<String>,
     search_raw: Mutex<Vec<ApiSearchResult>>,
     search_quality: Mutex<String>,
@@ -44,8 +50,10 @@ struct TorrServerShared {
     search_source: Mutex<i32>,
     rutracker: RuTrackerClient,
     detected_players: Mutex<Vec<DetectedPlayer>>,
+    available_releases: Mutex<Vec<MatrixReleaseOption>>,
     history: Mutex<Vec<HistoryRecord>>,
     last_status: Mutex<ModuleStatus>,
+    last_list_err_log: Mutex<Option<Instant>>,
     clipboard: Mutex<Option<ClipboardWatcher>>,
 }
 
@@ -55,6 +63,13 @@ impl TorrServerShared {
             .lock()
             .map(|c| c.torrserver.clone())
             .unwrap_or_default()
+    }
+
+    fn keep_in_memory(&self) -> bool {
+        self.config
+            .lock()
+            .map(|c| c.core.keep_in_memory)
+            .unwrap_or(true)
     }
 
     fn update_ts_config<F: FnOnce(&mut TorrServerConfig)>(&self, f: F) {
@@ -88,6 +103,7 @@ pub struct TorrServerModule {
 impl TorrServerModule {
     pub fn new(paths: PortablePaths, config: Arc<Mutex<AppConfig>>) -> Self {
         let history = load_history(&paths.ts_history_path);
+        let torrents_meta = load_torrents_meta(&paths.ts_torrents_meta_path);
         let players = detect_installed_players();
         let server = ServerManager::new(paths.clone());
         let rutracker = RuTrackerClient::new(paths.ts_webview_dir.clone());
@@ -99,7 +115,9 @@ impl TorrServerModule {
             ui_weak: Mutex::new(None),
             window_visible: Arc::new(AtomicBool::new(true)),
             poll_stop: Arc::new(AtomicBool::new(false)),
+            engine_updating: Arc::new(AtomicBool::new(false)),
             cached_torrents: Mutex::new(Vec::new()),
+            torrents_meta: Mutex::new(torrents_meta),
             selected_hash: Mutex::new(String::new()),
             search_raw: Mutex::new(Vec::new()),
             search_quality: Mutex::new("ALL".to_string()),
@@ -107,8 +125,10 @@ impl TorrServerModule {
             search_source: Mutex::new(0),
             rutracker,
             detected_players: Mutex::new(players),
+            available_releases: Mutex::new(default_matrix_releases()),
             history: Mutex::new(history),
             last_status: Mutex::new(ModuleStatus::default()),
+            last_list_err_log: Mutex::new(None),
             clipboard: Mutex::new(None),
         });
 
@@ -129,15 +149,16 @@ impl AppModule for TorrServerModule {
 
     fn on_init(&mut self) {
         let cfg = self.shared.ts_config();
+        let high_prio = self.shared.keep_in_memory();
         if cfg.mode == 0 {
             if self.shared.server.binary_exists() {
-                if let Err(e) = self.shared.server.start(&cfg) {
+                if let Err(e) = self.shared.server.start(&cfg, high_prio) {
                     diagnostics::error("[TS:ENGINE]", e);
                 }
             } else {
                 diagnostics::warn(
                     "[TS:ENGINE]",
-                    "TorrServer-windows-amd64.exe отсутствует в data/torrserver/ — ожидается загрузка пользователем",
+                    "TorrServer-windows-amd64.exe отсутствует в data/torrserver/ — выберите версию и загрузите движок",
                 );
             }
         }
@@ -151,6 +172,7 @@ impl AppModule for TorrServerModule {
                 match api.add_magnet(&magnet, None) {
                     Ok(t) => {
                         let title = t.display_title();
+                        record_torrent_timestamp(&shared_add, &t.hash, t.timestamp);
                         shared_add.toast(format!("Добавлено из буфера: {title}"));
                         refresh_torrents_and_status(&shared_add);
                     }
@@ -164,7 +186,16 @@ impl AppModule for TorrServerModule {
             *guard = Some(watcher);
         }
 
-        // Start background UI polling thread (pauses automatically when window hidden in tray)
+        // Background GitHub MatriX release list fetch
+        let shared_rel = Arc::clone(&self.shared);
+        thread::Builder::new()
+            .name("ts-gh-releases".to_string())
+            .spawn(move || {
+                refresh_github_releases_bg(&shared_rel, false);
+            })
+            .ok();
+
+        // Start background UI polling + Engine Watchdog thread
         let shared_poll = Arc::clone(&self.shared);
         thread::Builder::new()
             .name("ts-ui-poller".to_string())
@@ -172,12 +203,20 @@ impl AppModule for TorrServerModule {
                 // Give engine a brief moment to boot on startup
                 thread::sleep(Duration::from_millis(700));
                 sync_engine_settings_from_server(&shared_poll);
+                let mut bg_watchdog_ticks = 0u32;
+                let mut consec_echo_fail = 0u32;
                 while !shared_poll.poll_stop.load(Ordering::Relaxed) {
-                    if shared_poll.window_visible.load(Ordering::Relaxed) {
+                    let visible = shared_poll.window_visible.load(Ordering::Relaxed);
+                    if visible {
                         refresh_torrents_and_status(&shared_poll);
+                        maybe_run_watchdog(&shared_poll, &mut consec_echo_fail);
                         thread::sleep(Duration::from_millis(1600));
                     } else {
-                        thread::sleep(Duration::from_millis(500));
+                        bg_watchdog_ticks = bg_watchdog_ticks.wrapping_add(1);
+                        if bg_watchdog_ticks % 4 == 0 {
+                            maybe_run_watchdog(&shared_poll, &mut consec_echo_fail);
+                        }
+                        thread::sleep(Duration::from_millis(850));
                     }
                 }
             })
@@ -197,6 +236,9 @@ impl AppModule for TorrServerModule {
         ui.set_ts_remote_url(cfg.remote_url.clone().into());
         ui.set_ts_username(cfg.username.clone().into());
         ui.set_ts_password(cfg.password.clone().into());
+        ui.set_engine_watchdog(cfg.engine_watchdog);
+        ui.set_keep_engine_on_exit(cfg.keep_engine_on_exit);
+        ui.set_torrents_sort_mode(cfg.torrents_sort_mode);
         ui.set_only_video_files(cfg.only_video_files);
         ui.set_engine_missing(!self.shared.server.binary_exists());
 
@@ -232,6 +274,7 @@ impl AppModule for TorrServerModule {
             );
         }
 
+        sync_releases_to_ui(&self.shared, ui);
         sync_players_to_ui(&self.shared, ui);
         sync_history_to_ui(&self.shared, ui);
 
@@ -438,11 +481,22 @@ impl AppModule for TorrServerModule {
             });
         }
 
-        // 12. Toggle Only Video files
+        // 12. Toggle Only Video files & Sort torrents
         {
             let shared = Arc::clone(&self.shared);
             ui.on_toggle_only_video(move |only| {
                 shared.update_ts_config(|c| c.only_video_files = only);
+                push_torrents_to_ui(&shared);
+            });
+        }
+        {
+            let shared = Arc::clone(&self.shared);
+            let weak = ui.as_weak();
+            ui.on_set_torrents_sort(move |mode| {
+                shared.update_ts_config(|c| c.torrents_sort_mode = mode);
+                if let Some(app) = weak.upgrade() {
+                    app.set_torrents_sort_mode(mode);
+                }
                 push_torrents_to_ui(&shared);
             });
         }
@@ -573,7 +627,7 @@ impl AppModule for TorrServerModule {
             });
         }
 
-        // 13. Search torrents
+        // 13. Search torrents & Top 24h
         {
             let shared = Arc::clone(&self.shared);
             let weak = ui.as_weak();
@@ -589,6 +643,20 @@ impl AppModule for TorrServerModule {
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
                     run_search(&s, &q);
+                });
+            });
+        }
+        {
+            let shared = Arc::clone(&self.shared);
+            let weak = ui.as_weak();
+            ui.on_fetch_top_24h(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.set_search_loading(true);
+                    app.set_search_error("".into());
+                }
+                let s = Arc::clone(&shared);
+                thread::spawn(move || {
+                    run_top_24h(&s);
                 });
             });
         }
@@ -739,6 +807,8 @@ impl AppModule for TorrServerModule {
                     let remote_url = app.get_ts_remote_url().trim().to_string();
                     let username = app.get_ts_username().to_string();
                     let password = app.get_ts_password().to_string();
+                    let watchdog = app.get_engine_watchdog();
+                    let keep_on_exit = app.get_keep_engine_on_exit();
 
                     app.set_is_remote_mode(mode == 1);
                     shared.update_ts_config(|c| {
@@ -747,12 +817,15 @@ impl AppModule for TorrServerModule {
                         c.remote_url = remote_url;
                         c.username = username;
                         c.password = password;
+                        c.engine_watchdog = watchdog;
+                        c.keep_engine_on_exit = keep_on_exit;
                     });
                     let s = Arc::clone(&shared);
                     thread::spawn(move || {
                         let cfg = s.ts_config();
+                        let high_prio = s.keep_in_memory();
                         if cfg.mode == 0 {
-                            let _ = s.server.restart(&cfg);
+                            let _ = s.server.restart(&cfg, high_prio);
                         } else {
                             s.server.stop(&cfg);
                         }
@@ -771,7 +844,8 @@ impl AppModule for TorrServerModule {
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
                     let cfg = s.ts_config();
-                    match s.server.restart(&cfg) {
+                    let high_prio = s.keep_in_memory();
+                    match s.server.restart(&cfg, high_prio) {
                         Ok(_) => s.toast("Движок TorrServer перезапущен"),
                         Err(e) => s.toast(e),
                     }
@@ -781,34 +855,97 @@ impl AppModule for TorrServerModule {
             });
         }
 
+        // 18a. Engine release selection & refresh
+        {
+            let shared = Arc::clone(&self.shared);
+            let weak = ui.as_weak();
+            ui.on_select_engine_version(move |idx| {
+                let tag = if idx <= 0 {
+                    String::new()
+                } else {
+                    shared
+                        .available_releases
+                        .lock()
+                        .ok()
+                        .and_then(|list| list.get((idx - 1) as usize).map(|r| r.tag.clone()))
+                        .unwrap_or_default()
+                };
+                shared.update_ts_config(|c| c.preferred_engine_tag = tag);
+                if let Some(app) = weak.upgrade() {
+                    app.set_engine_version_selected_idx(idx.max(0));
+                }
+            });
+        }
+        {
+            let shared = Arc::clone(&self.shared);
+            let weak = ui.as_weak();
+            ui.on_refresh_engine_versions(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.set_engine_versions_loading(true);
+                }
+                let s = Arc::clone(&shared);
+                thread::spawn(move || {
+                    refresh_github_releases_bg(&s, true);
+                });
+            });
+        }
+
         // 19. Download / Update engine from GitHub
         {
             let shared = Arc::clone(&self.shared);
             let weak = ui.as_weak();
             ui.on_download_update_engine(move || {
+                let selected_idx = weak
+                    .upgrade()
+                    .map(|app| app.get_engine_version_selected_idx())
+                    .unwrap_or(0);
+                let target_tag: Option<String> = if selected_idx <= 0 {
+                    None
+                } else {
+                    shared
+                        .available_releases
+                        .lock()
+                        .ok()
+                        .and_then(|list| list.get((selected_idx - 1) as usize).map(|r| r.tag.clone()))
+                };
+
                 if let Some(app) = weak.upgrade() {
                     app.set_engine_updating(true);
                     app.set_engine_update_progress(0.0);
                     app.set_engine_update_status("Стадия 1/4: подготовка к загрузке...".into());
                 }
+                shared.engine_updating.store(true, Ordering::Relaxed);
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
                     let cfg = s.ts_config();
+                    let high_prio = s.keep_in_memory();
+                    let known = s
+                        .available_releases
+                        .lock()
+                        .map(|r| r.clone())
+                        .unwrap_or_default();
                     let s_cb = Arc::clone(&s);
-                    let res = s.server.update_from_github(&cfg, move |status_msg, prog| {
-                        let msg = status_msg.to_string();
-                        if let Ok(guard) = s_cb.ui_weak.lock() {
-                            if let Some(w) = guard.as_ref() {
-                                let w_c = w.clone();
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(app) = w_c.upgrade() {
-                                        app.set_engine_update_status(msg.into());
-                                        app.set_engine_update_progress(prog);
-                                    }
-                                });
+                    let res = s.server.update_from_github(
+                        &cfg,
+                        high_prio,
+                        target_tag.as_deref(),
+                        &known,
+                        move |status_msg, prog| {
+                            let msg = status_msg.to_string();
+                            if let Ok(guard) = s_cb.ui_weak.lock() {
+                                if let Some(w) = guard.as_ref() {
+                                    let w_c = w.clone();
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(app) = w_c.upgrade() {
+                                            app.set_engine_update_status(msg.into());
+                                            app.set_engine_update_progress(prog);
+                                        }
+                                    });
+                                }
                             }
-                        }
-                    });
+                        },
+                    );
+                    s.engine_updating.store(false, Ordering::Relaxed);
 
                     let final_exists = s.server.binary_exists();
                     if let Ok(guard) = s.ui_weak.lock() {
@@ -855,7 +992,8 @@ impl AppModule for TorrServerModule {
                         return;
                     };
                     let cfg = s.ts_config();
-                    match s.server.install_local_exe(&cfg, &path) {
+                    let high_prio = s.keep_in_memory();
+                    match s.server.install_local_exe(&cfg, &path, high_prio) {
                         Ok(_) => {
                             let final_exists = s.server.binary_exists();
                             if let Ok(guard) = s.ui_weak.lock() {
@@ -1167,7 +1305,14 @@ impl AppModule for TorrServerModule {
             }
         }
         let cfg = self.shared.ts_config();
-        self.shared.server.stop(&cfg);
+        if cfg.keep_engine_on_exit {
+            diagnostics::info(
+                "[TS:ENGINE]",
+                "Движок MatriX оставлен запущенным в фоне (keep_engine_on_exit=true)",
+            );
+        } else {
+            self.shared.server.stop(&cfg);
+        }
     }
 
     fn status_line(&self) -> ModuleStatus {
@@ -1188,10 +1333,12 @@ impl AppModule for TorrServerModule {
             .map(|p| p.len())
             .unwrap_or(0);
         format!(
-            "  Mode: {} | Endpoint: {} | BinaryExists: {} | DetectedPlayers: {}",
+            "  Mode: {} | Endpoint: {} | BinaryExists: {} | Watchdog: {} | KeepOnExit: {} | DetectedPlayers: {}",
             mode_str,
             cfg.effective_base_url(),
             self.shared.server.binary_exists(),
+            cfg.engine_watchdog,
+            cfg.keep_engine_on_exit,
             players_count
         )
     }
@@ -1225,7 +1372,8 @@ impl AppModule for TorrServerModule {
                 let s = Arc::clone(&self.shared);
                 thread::spawn(move || {
                     let cfg = s.ts_config();
-                    let _ = s.server.restart(&cfg);
+                    let high_prio = s.keep_in_memory();
+                    let _ = s.server.restart(&cfg, high_prio);
                     thread::sleep(Duration::from_millis(500));
                     refresh_torrents_and_status(&s);
                 });
@@ -1234,6 +1382,14 @@ impl AppModule for TorrServerModule {
             "open_web_panel" => {
                 let url = self.shared.ts_config().effective_base_url();
                 core::open_url_in_browser(&url);
+                true
+            }
+            "priority_high" => {
+                self.shared.server.apply_child_priority(true);
+                true
+            }
+            "priority_normal" => {
+                self.shared.server.apply_child_priority(false);
                 true
             }
             _ => false,
@@ -1303,6 +1459,7 @@ fn add_and_optionally_play(
         Ok(t) => {
             let hash = t.hash.clone();
             let disp = t.display_title();
+            record_torrent_timestamp(shared, &hash, t.timestamp);
             diagnostics::info("[TS:API]", format!("Добавлена раздача: {disp} ({hash})"));
             if let Ok(mut sel) = shared.selected_hash.lock() {
                 *sel = hash.clone();
@@ -1328,6 +1485,7 @@ fn upload_torrent_files(shared: &Arc<TorrServerShared>, paths: &[PathBuf]) {
         match api.upload_torrent_file(p) {
             Ok(t) => {
                 let disp = t.display_title();
+                record_torrent_timestamp(shared, &t.hash, t.timestamp);
                 diagnostics::info("[TS:API]", format!("Загружен .torrent: {disp}"));
                 if let Ok(mut sel) = shared.selected_hash.lock() {
                     *sel = t.hash.clone();
@@ -1504,6 +1662,127 @@ fn play_torrent_m3u(shared: &Arc<TorrServerShared>, hash: &str) {
     }
 }
 
+fn maybe_run_watchdog(shared: &Arc<TorrServerShared>, consec_echo_fail: &mut u32) {
+    let cfg = shared.ts_config();
+    if cfg.mode != 0
+        || !cfg.engine_watchdog
+        || shared.engine_updating.load(Ordering::Relaxed)
+        || !shared.server.binary_exists()
+    {
+        *consec_echo_fail = 0;
+        return;
+    }
+
+    let child_state = shared.server.child_running_state();
+    let api = TorrServerApi::from_config(&cfg);
+    match api.echo() {
+        Ok(_) => {
+            *consec_echo_fail = 0;
+        }
+        Err(err) => {
+            if err.contains("HTTP 404") {
+                *consec_echo_fail = 0;
+                return;
+            }
+            *consec_echo_fail = consec_echo_fail.saturating_add(1);
+            let exited = child_state == Some(false);
+            if exited || *consec_echo_fail >= 3 {
+                *consec_echo_fail = 0;
+                diagnostics::warn(
+                    "[TS:WATCHDOG]",
+                    "Локальный движок TorrServer выгрузился или не отвечает — автоматический перезапуск",
+                );
+                let high_prio = shared.keep_in_memory();
+                if let Err(e) = shared.server.start(&cfg, high_prio) {
+                    diagnostics::error("[TS:WATCHDOG]", format!("Не удалось перезапустить движок: {e}"));
+                } else {
+                    thread::sleep(Duration::from_millis(500));
+                    refresh_torrents_and_status(shared);
+                }
+            }
+        }
+    }
+}
+
+fn load_torrents_meta(path: &Path) -> HashMap<String, i64> {
+    if !path.exists() {
+        return HashMap::new();
+    }
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<HashMap<String, i64>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_torrents_meta(path: &Path, map: &HashMap<String, i64>) {
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, json).is_ok() {
+            if path.exists() {
+                let _ = std::fs::remove_file(path);
+            }
+            let _ = std::fs::rename(&tmp, path);
+        }
+    }
+}
+
+fn record_torrent_timestamp(shared: &Arc<TorrServerShared>, hash: &str, server_ts: i64) -> i64 {
+    let key = hash.trim().to_lowercase();
+    if key.is_empty() {
+        return server_ts;
+    }
+    let now = Utc::now().timestamp();
+    let ts_candidate = if server_ts > 900_000_000 { server_ts } else { now };
+    if let Ok(mut meta) = shared.torrents_meta.lock() {
+        let mut changed = false;
+        let val = match meta.get(&key).copied() {
+            Some(existing) if server_ts > 900_000_000 && server_ts != existing => {
+                meta.insert(key, server_ts);
+                changed = true;
+                server_ts
+            }
+            Some(existing) => existing,
+            None => {
+                meta.insert(key, ts_candidate);
+                changed = true;
+                ts_candidate
+            }
+        };
+        if changed {
+            save_torrents_meta(&shared.paths.ts_torrents_meta_path, &meta);
+        }
+        return val;
+    }
+    ts_candidate
+}
+
+fn sync_torrents_meta_from_list(shared: &Arc<TorrServerShared>, list: &[ApiTorrent]) {
+    let now = Utc::now().timestamp();
+    if let Ok(mut meta) = shared.torrents_meta.lock() {
+        let mut changed = false;
+        let total = list.len() as i64;
+        for (idx, t) in list.iter().enumerate() {
+            let key = t.hash.trim().to_lowercase();
+            if key.is_empty() {
+                continue;
+            }
+            if t.timestamp > 900_000_000 {
+                if meta.get(&key).copied() != Some(t.timestamp) {
+                    meta.insert(key, t.timestamp);
+                    changed = true;
+                }
+            } else if !meta.contains_key(&key) {
+                // Preserve initial server list order slightly spaced if multiple unseen items appear together
+                meta.insert(key, now - (total - idx as i64));
+                changed = true;
+            }
+        }
+        if changed {
+            save_torrents_meta(&shared.paths.ts_torrents_meta_path, &meta);
+        }
+    }
+}
+
 fn refresh_torrents_and_status(shared: &Arc<TorrServerShared>) {
     let cfg = shared.ts_config();
     let api = TorrServerApi::from_config(&cfg);
@@ -1516,12 +1795,35 @@ fn refresh_torrents_and_status(shared: &Arc<TorrServerShared>) {
             status.state_label = format!("Подключён ({ping_ms} мс)");
             status.version_label = ver;
 
-            if let Ok(list) = api.list_torrents() {
-                let total_speed: f64 = list.iter().map(|t| t.download_speed).sum();
-                status.speed_label = format_speed(total_speed);
-                status.active_count = list.len() as i32;
-                if let Ok(mut cache) = shared.cached_torrents.lock() {
-                    *cache = list;
+            match api.list_torrents() {
+                Ok(list) => {
+                    let total_speed: f64 = list.iter().map(|t| t.download_speed).sum();
+                    status.speed_label = format_speed(total_speed);
+                    status.active_count = list.len() as i32;
+                    sync_torrents_meta_from_list(shared, &list);
+                    if let Ok(mut cache) = shared.cached_torrents.lock() {
+                        *cache = list;
+                    }
+                }
+                Err(e) => {
+                    let should_log = shared
+                        .last_list_err_log
+                        .lock()
+                        .ok()
+                        .map(|mut guard| {
+                            let now = Instant::now();
+                            let log_it = guard
+                                .map(|prev| now.duration_since(prev) > Duration::from_secs(15))
+                                .unwrap_or(true);
+                            if log_it {
+                                *guard = Some(now);
+                            }
+                            log_it
+                        })
+                        .unwrap_or(false);
+                    if should_log {
+                        diagnostics::warn("[TS:API]", format!("Ошибка получения /torrents list: {e}"));
+                    }
                 }
             }
         }
@@ -1547,11 +1849,58 @@ fn refresh_torrents_and_status(shared: &Arc<TorrServerShared>) {
 fn push_torrents_to_ui(shared: &Arc<TorrServerShared>) {
     let cfg = shared.ts_config();
     let api = TorrServerApi::from_config(&cfg);
-    let torrents = shared
+    let mut torrents = shared
         .cached_torrents
         .lock()
         .map(|c| c.clone())
         .unwrap_or_default();
+    let meta_map = shared
+        .torrents_meta
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_default();
+
+    let ts_for = |t: &ApiTorrent| -> i64 {
+        if t.timestamp > 900_000_000 {
+            t.timestamp
+        } else {
+            meta_map
+                .get(&t.hash.trim().to_lowercase())
+                .copied()
+                .unwrap_or(0)
+        }
+    };
+
+    match cfg.torrents_sort_mode {
+        1 => torrents.sort_by(|a, b| {
+            ts_for(a)
+                .cmp(&ts_for(b))
+                .then_with(|| a.display_title().to_lowercase().cmp(&b.display_title().to_lowercase()))
+        }),
+        2 => torrents.sort_by(|a, b| {
+            a.display_title()
+                .to_lowercase()
+                .cmp(&b.display_title().to_lowercase())
+        }),
+        3 => torrents.sort_by(|a, b| {
+            b.torrent_size
+                .cmp(&a.torrent_size)
+                .then_with(|| ts_for(b).cmp(&ts_for(a)))
+        }),
+        4 => torrents.sort_by(|a, b| {
+            b.download_speed
+                .partial_cmp(&a.download_speed)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.active_peers.cmp(&a.active_peers))
+                .then_with(|| ts_for(b).cmp(&ts_for(a)))
+        }),
+        _ => torrents.sort_by(|a, b| {
+            ts_for(b)
+                .cmp(&ts_for(a))
+                .then_with(|| a.display_title().to_lowercase().cmp(&b.display_title().to_lowercase()))
+        }),
+    }
+
     let selected = shared
         .selected_hash
         .lock()
@@ -1582,6 +1931,8 @@ fn push_torrents_to_ui(shared: &Arc<TorrServerShared>) {
             } else {
                 0.0
             };
+            let added_ts = ts_for(t);
+            let added_text = format_unix_datetime_short(added_ts);
             TorrentItem {
                 hash: t.hash.clone().into(),
                 title: t.display_title().into(),
@@ -1594,6 +1945,7 @@ fn push_torrents_to_ui(shared: &Arc<TorrServerShared>) {
                 } else {
                     t.stat_string.clone().into()
                 },
+                added_text: added_text.into(),
                 magnet: format!("magnet:?xt=urn:btih:{}", t.hash).into(),
                 is_selected: t.hash == selected,
             }
@@ -1632,9 +1984,11 @@ fn push_torrents_to_ui(shared: &Arc<TorrServerShared>) {
         if let Some(weak) = guard.as_ref() {
             let w_c = weak.clone();
             let sel_hash = selected;
+            let sort_mode = cfg.torrents_sort_mode;
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(app) = w_c.upgrade() {
                     app.set_torrents(ModelRc::from(Rc::new(VecModel::from(ui_torrents))));
+                    app.set_torrents_sort_mode(sort_mode);
                     app.set_selected_torrent_hash(sel_hash.into());
                     app.set_selected_torrent_title(selected_title.into());
                     app.set_selected_files(ModelRc::from(Rc::new(VecModel::from(ui_files))));
@@ -1733,6 +2087,100 @@ fn run_search(shared: &Arc<TorrServerShared>, query: &str) {
     }
 }
 
+fn run_top_24h(shared: &Arc<TorrServerShared>) {
+    let cfg = shared.ts_config();
+    let api = TorrServerApi::from_config(&cfg);
+    let source_mode = shared.search_source.lock().map(|m| *m).unwrap_or(0);
+
+    let mut combined: Vec<ApiSearchResult> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+
+    match source_mode {
+        // 1: Only RuTor
+        1 => match api.fetch_top_24h_rutor_direct() {
+            Ok(list) => combined = list,
+            Err(e) => notes.push(e),
+        },
+        // 2: Only RuTracker
+        2 => match shared.rutracker.fetch_top_24h(&cfg) {
+            Ok(list) => combined = list,
+            Err(e) => notes.push(e),
+        },
+        // 3: Only JacRed
+        3 => match api.fetch_top_24h_jacred() {
+            Ok(list) => combined = list,
+            Err(e) => notes.push(e),
+        },
+        // 0: All available sources combined
+        _ => {
+            match api.fetch_top_24h_jacred() {
+                Ok(mut jr) => combined.append(&mut jr),
+                Err(e) => notes.push(format!("JacRed: {e}")),
+            }
+            match api.fetch_top_24h_rutor_direct() {
+                Ok(mut rt_top) => combined.append(&mut rt_top),
+                Err(e) => notes.push(format!("RuTor: {e}")),
+            }
+            if cfg.rutracker_enabled && cfg.has_rutracker_credentials() {
+                match shared.rutracker.fetch_top_24h(&cfg) {
+                    Ok(mut rt) => combined.append(&mut rt),
+                    Err(e) => notes.push(format!("RuTracker: {e}")),
+                }
+            }
+        }
+    }
+
+    // Deduplicate by infohash or normalized title, keeping highest seeders
+    combined.sort_by(|a, b| b.seeds.cmp(&a.seeds));
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut deduped: Vec<ApiSearchResult> = Vec::with_capacity(combined.len());
+    for item in combined {
+        let key = extract_btih(&item.magnet)
+            .unwrap_or_else(|| item.title.trim().to_lowercase());
+        if seen.insert(key) {
+            deduped.push(item);
+        }
+    }
+
+    if !deduped.is_empty() {
+        if let Ok(mut sort) = shared.search_sort.lock() {
+            *sort = 0; // Popularity (by seeds desc)
+        }
+        if let Ok(mut raw) = shared.search_raw.lock() {
+            *raw = deduped;
+        }
+        push_search_to_ui(shared, "");
+        shared.toast("Загружен Топ популярных раздач за 24 часа");
+    } else {
+        if let Ok(mut raw) = shared.search_raw.lock() {
+            raw.clear();
+        }
+        let err_text = if notes.is_empty() {
+            "Не удалось получить список популярных раздач за 24 часа".to_string()
+        } else {
+            let msg = format!("Топ 24ч недоступен ({})", notes.join("; "));
+            diagnostics::warn("[TS:API]", msg.clone());
+            msg
+        };
+        push_search_to_ui(shared, &err_text);
+    }
+}
+
+fn extract_btih(magnet: &str) -> Option<String> {
+    let low = magnet.to_lowercase();
+    let idx = low.find("xt=urn:btih:")?;
+    let rest = &low[idx + "xt=urn:btih:".len()..];
+    let hash: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric())
+        .collect();
+    if hash.len() >= 16 {
+        Some(hash)
+    } else {
+        None
+    }
+}
+
 fn push_search_to_ui(shared: &Arc<TorrServerShared>, err_msg: &str) {
     let quality = shared
         .search_quality
@@ -1759,14 +2207,24 @@ fn push_search_to_ui(shared: &Arc<TorrServerShared>, err_msg: &str) {
         })
         .collect();
 
-    if sort_mode == 1 {
-        filtered.sort_by(|a, b| {
+    match sort_mode {
+        1 => filtered.sort_by(|a, b| {
+            b.date_ts
+                .cmp(&a.date_ts)
+                .then_with(|| b.seeds.cmp(&a.seeds))
+        }),
+        2 => filtered.sort_by(|a, b| {
             b.size_bytes
                 .partial_cmp(&a.size_bytes)
                 .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    } else {
-        filtered.sort_by(|a, b| b.seeds.cmp(&a.seeds));
+                .then_with(|| b.seeds.cmp(&a.seeds))
+        }),
+        3 => filtered.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
+        _ => filtered.sort_by(|a, b| {
+            b.seeds
+                .cmp(&a.seeds)
+                .then_with(|| b.date_ts.cmp(&a.date_ts))
+        }),
     }
 
     let ui_items: Vec<SearchResultItem> = filtered
@@ -1780,6 +2238,7 @@ fn push_search_to_ui(shared: &Arc<TorrServerShared>, err_msg: &str) {
             peers: r.peers,
             quality: r.quality.into(),
             tracker: r.tracker.into(),
+            date_text: r.date_text.into(),
         })
         .collect();
 
@@ -1799,6 +2258,66 @@ fn push_search_to_ui(shared: &Arc<TorrServerShared>, err_msg: &str) {
             });
         }
     }
+}
+
+fn refresh_github_releases_bg(shared: &Arc<TorrServerShared>, manual: bool) {
+    match fetch_available_matrix_releases() {
+        Ok(list) => {
+            if let Ok(mut guard) = shared.available_releases.lock() {
+                *guard = list;
+            }
+            if manual {
+                shared.toast("Список версий MatriX обновлён с GitHub");
+            }
+        }
+        Err(e) => {
+            diagnostics::warn("[TS:UPDATER]", format!("Не удалось загрузить список версий MatriX: {e}"));
+            if manual {
+                shared.toast(format!("Не удалось обновить список версий: {e}"));
+            }
+        }
+    }
+
+    if let Ok(guard) = shared.ui_weak.lock() {
+        if let Some(weak) = guard.as_ref() {
+            let w_c = weak.clone();
+            let s_c = Arc::clone(shared);
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = w_c.upgrade() {
+                    app.set_engine_versions_loading(false);
+                    sync_releases_to_ui(&s_c, &app);
+                }
+            });
+        }
+    }
+}
+
+fn sync_releases_to_ui(shared: &Arc<TorrServerShared>, ui: &AppWindow) {
+    let cfg = shared.ts_config();
+    let releases = shared
+        .available_releases
+        .lock()
+        .map(|r| r.clone())
+        .unwrap_or_default();
+
+    let mut presets: Vec<SharedString> = Vec::with_capacity(releases.len() + 1);
+    presets.push("Авто (последний стабильный MatriX)".into());
+    for r in &releases {
+        presets.push(r.label.clone().into());
+    }
+
+    let sel_idx = if cfg.preferred_engine_tag.trim().is_empty() {
+        0
+    } else {
+        releases
+            .iter()
+            .position(|r| r.tag == cfg.preferred_engine_tag.trim())
+            .map(|i| (i + 1) as i32)
+            .unwrap_or(0)
+    };
+
+    ui.set_engine_version_presets(ModelRc::from(Rc::new(VecModel::from(presets))));
+    ui.set_engine_version_selected_idx(sel_idx);
 }
 
 fn sync_players_to_ui(shared: &Arc<TorrServerShared>, ui: &AppWindow) {

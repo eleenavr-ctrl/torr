@@ -13,6 +13,7 @@ pub struct PortablePaths {
     pub ts_cache_dir: PathBuf,
     pub ts_playlists_dir: PathBuf,
     pub ts_history_path: PathBuf,
+    pub ts_torrents_meta_path: PathBuf,
     pub ts_webview_dir: PathBuf,
     pub modules_dir: PathBuf,
 }
@@ -49,6 +50,7 @@ impl PortablePaths {
             config_path: data_dir.join("config.json"),
             torrserver_exe: torrserver_dir.join("TorrServer-windows-amd64.exe"),
             ts_history_path: torrserver_dir.join("history.json"),
+            ts_torrents_meta_path: torrserver_dir.join("torrents_meta.json"),
             ts_webview_dir: torrserver_dir.join("webview2"),
             data_dir,
             torrserver_dir,
@@ -64,6 +66,8 @@ impl PortablePaths {
 pub struct CoreConfig {
     pub theme_mode: i32, // 0 = System, 1 = Light, 2 = Dark
     pub autostart: bool,
+    pub start_minimized: bool,
+    pub keep_in_memory: bool,
 }
 
 impl Default for CoreConfig {
@@ -71,6 +75,8 @@ impl Default for CoreConfig {
         Self {
             theme_mode: 0,
             autostart: false,
+            start_minimized: false,
+            keep_in_memory: true,
         }
     }
 }
@@ -83,6 +89,10 @@ pub struct TorrServerConfig {
     pub remote_url: String,
     pub username: String,
     pub password: String,
+    pub preferred_engine_tag: String,
+    pub engine_watchdog: bool,
+    pub keep_engine_on_exit: bool,
+    pub torrents_sort_mode: i32, // 0 = Date desc, 1 = Date asc, 2 = Title, 3 = Size, 4 = Speed
     pub player_id: String,
     pub player_custom_path: String,
     pub player_args: String,
@@ -114,6 +124,10 @@ impl Default for TorrServerConfig {
             remote_url: "http://127.0.0.1:8090".to_string(),
             username: String::new(),
             password: String::new(),
+            preferred_engine_tag: String::new(),
+            engine_watchdog: true,
+            keep_engine_on_exit: false,
+            torrents_sort_mode: 0,
             player_id: "auto".to_string(),
             player_custom_path: String::new(),
             player_args: String::new(),

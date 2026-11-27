@@ -1,10 +1,11 @@
-import { LineEdit, CheckBox, ScrollView } from "std-widgets.slint";
+import { ComboBox, LineEdit, CheckBox, ScrollView } from "std-widgets.slint";
 import { Theme, TorrentItem, TorrentFileItem } from "../../theme.slint";
 import { FluentCard, FluentButton, FluentMenuItem } from "../../components.slint";
 
 export component TorrentsView inherits Rectangle {
     in-out property <string> magnet-input: "";
     in-out property <[TorrentItem]> torrents;
+    in-out property <int> torrents-sort-mode: 0;
     in-out property <string> selected-torrent-hash: "";
     in-out property <string> selected-torrent-title: "";
     in-out property <[TorrentFileItem]> selected-files;
@@ -13,6 +14,9 @@ export component TorrentsView inherits Rectangle {
     in-out property <bool> engine-updating: false;
     in-out property <string> engine-update-status: "";
     in-out property <float> engine-update-progress: 0.0;
+    in-out property <[string]> engine-version-presets;
+    in-out property <int> engine-version-selected-idx: 0;
+    in-out property <bool> engine-versions-loading: false;
     in-out property <bool> is-remote-mode: false;
     in-out property <bool> status-healthy: false;
 
@@ -21,6 +25,7 @@ export component TorrentsView inherits Rectangle {
     callback pick-torrent-file();
     callback select-torrent(string);
     callback refresh-torrents();
+    callback set-torrents-sort(int);
     callback drop-torrent(string);
     callback remove-torrent(string);
     callback copy-torrent-magnet(string);
@@ -28,6 +33,8 @@ export component TorrentsView inherits Rectangle {
     callback play-all-m3u(string);
     callback copy-stream-url(string, int);
     callback toggle-only-video(bool);
+    callback select-engine-version(int);
+    callback refresh-engine-versions();
     callback download-update-engine();
     callback pick-engine-exe();
     callback export-torrents();
@@ -191,55 +198,82 @@ export component TorrentsView inherits Rectangle {
             border-width: 1px;
             border-color: Theme.accent;
 
-            HorizontalLayout {
+            VerticalLayout {
                 padding: 12px;
-                spacing: 12px;
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 2px;
-                    Text {
-                        text: "Движок TorrServer-windows-amd64.exe не найден в data/torrserver/";
-                        font-family: Theme.font-ui;
-                        font-size: 13px;
-                        font-weight: 600;
-                        color: Theme.text-primary;
-                    }
-                    Text {
-                        text: root.engine-update-status != ""
-                            ? root.engine-update-status
-                            : "Нажмите кнопку справа, чтобы автоматически скачать последний релиз YouROK/TorrServer с GitHub.";
-                        font-family: Theme.font-ui;
-                        font-size: 12px;
-                        color: root.engine-updating ? Theme.accent : Theme.text-secondary;
-                        wrap: word-wrap;
-                    }
-                    if (root.engine-updating) : Rectangle {
-                        height: 6px;
-                        border-radius: 3px;
-                        background: Theme.border-color;
-                        Rectangle {
-                            x: 0px;
-                            y: 0px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text {
+                            text: "Движок TorrServer-windows-amd64.exe не найден в data/torrserver/";
+                            font-family: Theme.font-ui;
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: Theme.text-primary;
+                        }
+                        Text {
+                            text: root.engine-update-status != ""
+                                ? root.engine-update-status
+                                : "Выберите нужную версию TorrServer MatriX (YouROK/TorrServer) и скачайте с GitHub или укажите локальный .exe.";
+                            font-family: Theme.font-ui;
+                            font-size: 12px;
+                            color: root.engine-updating ? Theme.accent : Theme.text-secondary;
+                            wrap: word-wrap;
+                        }
+                        if (root.engine-updating) : Rectangle {
                             height: 6px;
                             border-radius: 3px;
-                            width: parent.width * clamp(root.engine-update-progress, 0.0, 1.0);
-                            background: Theme.accent;
+                            background: Theme.border-color;
+                            Rectangle {
+                                x: 0px;
+                                y: 0px;
+                                height: 6px;
+                                border-radius: 3px;
+                                width: parent.width * clamp(root.engine-update-progress, 0.0, 1.0);
+                                background: Theme.accent;
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        FluentButton {
+                            text: root.engine-updating ? "Загрузка..." : "⬇  Скачать MatriX";
+                            primary: true;
+                            enabled: !root.engine-updating;
+                            clicked => { root.download-update-engine(); }
+                        }
+                        FluentButton {
+                            text: "Указать .exe...";
+                            enabled: !root.engine-updating;
+                            clicked => { root.pick-engine-exe(); }
                         }
                     }
                 }
+
                 HorizontalLayout {
-                    alignment: center;
                     spacing: 8px;
-                    FluentButton {
-                        text: root.engine-updating ? "Загрузка..." : "⬇  Скачать движок";
-                        primary: true;
-                        enabled: !root.engine-updating;
-                        clicked => { root.download-update-engine(); }
+                    Text {
+                        text: "Версия MatriX:";
+                        font-family: Theme.font-ui;
+                        font-size: 12px;
+                        color: Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                    ComboBox {
+                        horizontal-stretch: 1;
+                        model: root.engine-version-presets;
+                        current-index <=> root.engine-version-selected-idx;
+                        selected => { root.select-engine-version(self.current-index); }
                     }
                     FluentButton {
-                        text: "Указать .exe...";
-                        enabled: !root.engine-updating;
-                        clicked => { root.pick-engine-exe(); }
+                        text: root.engine-versions-loading ? "..." : "↻";
+                        compact: true;
+                        enabled: !root.engine-versions-loading && !root.engine-updating;
+                        clicked => { root.refresh-engine-versions(); }
                     }
                 }
             }
@@ -316,13 +350,58 @@ export component TorrentsView inherits Rectangle {
                 }
             }
 
-            if (root.torrents.length > 0) : sv-torrents := ScrollView {
-                VerticalLayout {
-                    width: sv-torrents.visible-width;
-                    padding: 8px;
-                    spacing: 6px;
+            if (root.torrents.length > 0) : VerticalLayout {
+                vertical-stretch: 1;
 
-                    for item in root.torrents : Rectangle {
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 10px;
+                    Text {
+                        text: "Всего раздач: " + root.torrents.length;
+                        font-family: Theme.font-ui;
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: "Сортировка:";
+                        font-family: Theme.font-ui;
+                        font-size: 12px;
+                        color: Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                    ComboBox {
+                        width: 230px;
+                        model: [
+                            "По дате (сначала новые)",
+                            "По дате (сначала старые)",
+                            "По названию (А–Я)",
+                            "По размеру",
+                            "По скорости"
+                        ];
+                        current-index <=> root.torrents-sort-mode;
+                        selected => { root.set-torrents-sort(self.current-index); }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.border-color;
+                }
+
+                sv-torrents := ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        width: sv-torrents.visible-width;
+                        padding: 8px;
+                        spacing: 6px;
+
+                        for item in root.torrents : Rectangle {
                         border-radius: Theme.radius-ctrl;
                         border-width: 1px;
                         border-color: item.is-selected ? Theme.accent : Theme.border-color;
@@ -406,6 +485,12 @@ export component TorrentsView inherits Rectangle {
                                     font-size: 11px;
                                     color: Theme.text-secondary;
                                 }
+                                if (item.added-text != "") : Text {
+                                    text: "Добавлен: " + item.added-text;
+                                    font-family: Theme.font-ui;
+                                    font-size: 11px;
+                                    color: Theme.text-secondary;
+                                }
                                 Text {
                                     text: "Скорость: " + item.speed-text;
                                     font-family: Theme.font-ui;
@@ -421,6 +506,7 @@ export component TorrentsView inherits Rectangle {
                             }
                         }
                     }
+                }
                 }
             }
         }
