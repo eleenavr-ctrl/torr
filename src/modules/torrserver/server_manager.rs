@@ -284,8 +284,23 @@ impl ServerManager {
                     let reader = BufReader::new(stderr);
                     for line in reader.lines().map_while(Result::ok) {
                         let trimmed = line.trim();
-                        if !trimmed.is_empty() {
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        let low = trimmed.to_lowercase();
+                        if low.contains("panic:") || low.contains("fatal ") || low.contains("fatal:")
+                        {
+                            diagnostics::error("[TS:ENGINE]", trimmed.to_string());
+                        } else if low.contains(" error")
+                            || low.starts_with("error")
+                            || low.contains("err:")
+                            || low.contains("warn")
+                            || low.contains("failed")
+                            || low.contains("cannot ")
+                        {
                             diagnostics::warn("[TS:ENGINE]", trimmed.to_string());
+                        } else {
+                            diagnostics::info("[TS:ENGINE]", trimmed.to_string());
                         }
                     }
                 })

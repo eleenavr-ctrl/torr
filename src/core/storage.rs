@@ -80,6 +80,7 @@ pub struct TorrentOriginMeta {
     pub tracker_url: String,
     pub tracker_name: String,
     pub rutracker_topic_id: String,
+    pub source_title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -144,15 +144,76 @@ impl RuTrackerClient {
         if cfg.rutracker_use_webview {
             return self.webview.fetch_topic_html(cfg, topic_id);
         }
+
         let base = cfg.effective_rutracker_mirror();
-        let topic_url = format!("{base}/forum/viewtopic.php?t={topic_id}");
-        let client = self.ensure_client(cfg, false)?;
-        let mut html = self.get_text_cp1251(&client, cfg, &topic_url)?;
-        if looks_like_login_page(&html) && cfg.rutracker_cookie.trim().is_empty() {
-            let fresh = self.ensure_client(cfg, true)?;
-            html = self.get_text_cp1251(&fresh, cfg, &topic_url)?;
+        let mut last_err = String::new();
+
+        // 1. Try authenticated request on primary mirror if credentials/cookie are configured
+        if cfg.has_rutracker_credentials() {
+            let topic_url = format!("{base}/forum/viewtopic.php?t={topic_id}");
+            match self.ensure_client(cfg, false) {
+                Ok(client) => {
+                    match self.get_text_cp1251(&client, cfg, &topic_url) {
+                        Ok(mut html) => {
+                            if looks_like_login_page(&html) && cfg.rutracker_cookie.trim().is_empty()
+                            {
+                                if let Ok(fresh) = self.ensure_client(cfg, true) {
+                                    if let Ok(h2) = self.get_text_cp1251(&fresh, cfg, &topic_url) {
+                                        html = h2;
+                                    }
+                                }
+                            }
+                            if !looks_like_cloudflare_page(&html) && html.contains("post_body") {
+                                return Ok(html);
+                            }
+                            last_err = "Страница темы недоступна или защищена Cloudflare".to_string();
+                        }
+                        Err(e) => {
+                            last_err = e;
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_err = e;
+                }
+            }
         }
-        Ok(html)
+
+        // 2. Public topic view fallback across mirrors (viewtopic.php does not require login on mirrors)
+        if let Ok(pub_client) = build_http_client(cfg) {
+            let mut mirrors = vec![
+                base,
+                "https://rutracker.net".to_string(),
+                "https://rutracker.nl".to_string(),
+                "https://rutracker.org".to_string(),
+            ];
+            let mut tried: Vec<String> = Vec::new();
+            for m in mirrors.drain(..) {
+                let norm = m.trim_end_matches('/').to_string();
+                if tried.iter().any(|x| x.eq_ignore_ascii_case(&norm)) {
+                    continue;
+                }
+                tried.push(norm.clone());
+                let topic_url = format!("{norm}/forum/viewtopic.php?t={topic_id}");
+                match self.get_text_cp1251(&pub_client, cfg, &topic_url) {
+                    Ok(html) => {
+                        if !looks_like_cloudflare_page(&html) && html.contains("post_body") {
+                            return Ok(html);
+                        }
+                    }
+                    Err(e) => {
+                        if last_err.is_empty() {
+                            last_err = e;
+                        }
+                    }
+                }
+            }
+        }
+
+        if last_err.is_empty() {
+            last_err = "RuTracker недоступен".to_string();
+        }
+        Err(last_err)
     }
 
     pub fn fetch_torrent_or_magnet(
@@ -449,6 +510,14 @@ pub(crate) fn looks_like_login_page(html: &str) -> bool {
     low.contains("name=\"login_username\"")
         || low.contains("name='login_username'")
         || (low.contains("login.php") && low.contains("login_password"))
+}
+
+fn looks_like_cloudflare_page(html: &str) -> bool {
+    let low = html.to_lowercase();
+    low.contains("just a moment")
+        || low.contains("cf-browser-verification")
+        || low.contains("cf-turnstile")
+        || (low.contains("cloudflare") && low.contains("attention required"))
 }
 
 pub(crate) fn parse_tracker_html(html: &str, base_url: &str) -> Vec<ApiSearchResult> {

@@ -77,7 +77,31 @@ pub fn fetch_rich_metadata(
     }
 
     let raw_title = torrent.display_title();
-    let (clean_ru, clean_en, parsed_year) = extract_clean_title_and_year(&raw_title);
+    let source_hint = origin
+        .map(|o| o.source_title.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("");
+
+    let (disp_ru, disp_en, disp_year) = extract_clean_title_and_year(&raw_title);
+    let (hint_ru, hint_en, hint_year) = if !source_hint.is_empty() {
+        extract_clean_title_and_year(source_hint)
+    } else {
+        (String::new(), None, None)
+    };
+
+    let clean_ru = if contains_cyrillic(&hint_ru) {
+        hint_ru
+    } else if contains_cyrillic(&disp_ru) || disp_ru.is_empty() {
+        if !disp_ru.is_empty() {
+            disp_ru
+        } else {
+            hint_ru
+        }
+    } else {
+        disp_ru
+    };
+    let clean_en = disp_en.or(hint_en);
+    let parsed_year = disp_year.or(hint_year);
 
     let mut meta = TorrentRichMetadata {
         hash: hash_key.clone(),
@@ -112,7 +136,8 @@ pub fn fetch_rich_metadata(
                 extract_rutracker_topic_id(&o.tracker_url)
             }
         })
-        .or_else(|| extract_rutracker_topic_id(&meta.tracker_url));
+        .or_else(|| extract_rutracker_topic_id(&meta.tracker_url))
+        .or_else(|| extract_rutracker_topic_id_from_filename(source_hint));
 
     if let Some(tid) = rt_topic_id {
         if meta.tracker_url.is_empty() {
@@ -121,7 +146,7 @@ pub fn fetch_rich_metadata(
                 cfg.effective_rutracker_mirror()
             );
         }
-        if cfg.rutracker_enabled && cfg.has_rutracker_credentials() {
+        if !cfg.rutracker_use_webview || (cfg.rutracker_enabled && cfg.has_rutracker_credentials()) {
             match rutracker.fetch_topic_html(cfg, &tid) {
                 Ok(html) => {
                     parse_rutracker_topic_html(&html, &mut meta);
@@ -130,7 +155,12 @@ pub fn fetch_rich_metadata(
                     }
                 }
                 Err(e) => {
-                    diagnostics::warn("[TS:META]", format!("RuTracker topic #{tid}: {e}"));
+                    diagnostics::info(
+                        "[TS:META]",
+                        format!(
+                            "RuTracker тема #{tid} пропущена ({e}) — используются IMDb / Wikipedia / Кинопоиск"
+                        ),
+                    );
                 }
             }
         }
@@ -165,27 +195,36 @@ pub fn fetch_rich_metadata(
         || meta.rating_imdb.is_empty()
         || meta.screenshot_urls.is_empty();
     if needs_imdb {
-        let mut candidates: Vec<&str> = Vec::new();
+        let mut owned_candidates: Vec<String> = Vec::new();
         if let Some(en) = clean_en.as_deref() {
             if !en.is_empty() {
-                candidates.push(en);
+                owned_candidates.push(en.to_string());
+                let spaced = split_camel_case(en);
+                if spaced != en && !spaced.is_empty() {
+                    owned_candidates.push(spaced);
+                }
             }
         }
-        if !clean_ru.is_empty() {
-            candidates.push(clean_ru.as_str());
+        if !clean_ru.is_empty() && !owned_candidates.iter().any(|c| c == &clean_ru) {
+            owned_candidates.push(clean_ru.clone());
         }
-        if candidates.is_empty() {
-            candidates.push(raw_title.as_str());
+        if owned_candidates.is_empty() {
+            owned_candidates.push(raw_title.clone());
         }
-        enrich_from_imdb(&http, &candidates, parsed_year.as_deref(), &mut meta);
+        let cand_refs: Vec<&str> = owned_candidates.iter().map(|s| s.as_str()).collect();
+        enrich_from_imdb(&http, &cand_refs, parsed_year.as_deref(), &mut meta);
     }
 
-    if meta.description.is_empty() || !contains_cyrillic(&meta.description) {
+    if meta.description.is_empty()
+        || !contains_cyrillic(&meta.description)
+        || meta.poster_url.is_empty()
+    {
         let imdb_id_copy = meta.imdb_id.clone();
         enrich_russian_summary_from_wikipedia(
             &http,
             &imdb_id_copy,
             &clean_ru,
+            clean_en.as_deref(),
             parsed_year.as_deref(),
             &mut meta,
         );
@@ -991,48 +1030,43 @@ fn enrich_russian_summary_from_wikipedia(
     client: &Client,
     imdb_id: &str,
     clean_ru: &str,
+    clean_en: Option<&str>,
     year: Option<&str>,
     meta: &mut TorrentRichMetadata,
 ) {
     // 1. Exact lookup via Wikidata P345 (IMDb ID) -> ruwiki page
     if !imdb_id.is_empty() {
-        let wd_search = format!(
-            "https://www.wikidata.org/w/api.php?action=query&list=search&srsearch={}&format=json&srlimit=1",
-            urlencoding::encode(imdb_id)
-        );
-        if let Ok(resp) = client.get(&wd_search).send() {
-            if let Ok(v) = resp.json::<Value>() {
-                if let Some(qid) = v
-                    .get("query")
-                    .and_then(|q| q.get("search"))
-                    .and_then(|s| s.as_array())
-                    .and_then(|a| a.first())
-                    .and_then(|it| it.get("title"))
-                    .and_then(|t| t.as_str())
-                {
-                    let ent_url = format!(
-                        "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={qid}&props=sitelinks&sitefilter=ruwiki&format=json"
-                    );
-                    if let Ok(r2) = client.get(&ent_url).send() {
-                        if let Ok(v2) = r2.json::<Value>() {
-                            if let Some(ru_page) = v2
-                                .get("entities")
-                                .and_then(|e| e.get(qid))
-                                .and_then(|e| e.get("sitelinks"))
-                                .and_then(|s| s.get("ruwiki"))
-                                .and_then(|r| r.get("title"))
-                                .and_then(|t| t.as_str())
-                            {
-                                if let Some(summary) = fetch_ruwiki_summary(client, ru_page) {
-                                    meta.description = summary;
-                                    if !meta.source_label.contains("Wikipedia") {
-                                        meta.source_label = if meta.source_label.is_empty() {
-                                            "Wikipedia".to_string()
-                                        } else {
-                                            format!("{} + Wikipedia", meta.source_label)
-                                        };
+        for sr_query in [format!("haswbstatement:P345={imdb_id}"), imdb_id.to_string()] {
+            let wd_search = format!(
+                "https://www.wikidata.org/w/api.php?action=query&list=search&srsearch={}&format=json&srlimit=1",
+                urlencoding::encode(&sr_query)
+            );
+            if let Ok(resp) = client.get(&wd_search).send() {
+                if let Ok(v) = resp.json::<Value>() {
+                    if let Some(qid) = v
+                        .get("query")
+                        .and_then(|q| q.get("search"))
+                        .and_then(|s| s.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|it| it.get("title"))
+                        .and_then(|t| t.as_str())
+                    {
+                        let ent_url = format!(
+                            "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={qid}&props=sitelinks&sitefilter=ruwiki&format=json"
+                        );
+                        if let Ok(r2) = client.get(&ent_url).send() {
+                            if let Ok(v2) = r2.json::<Value>() {
+                                if let Some(ru_page) = v2
+                                    .get("entities")
+                                    .and_then(|e| e.get(qid))
+                                    .and_then(|e| e.get("sitelinks"))
+                                    .and_then(|s| s.get("ruwiki"))
+                                    .and_then(|r| r.get("title"))
+                                    .and_then(|t| t.as_str())
+                                {
+                                    if apply_ruwiki_page(client, ru_page, meta) {
+                                        return;
                                     }
-                                    return;
                                 }
                             }
                         }
@@ -1042,34 +1076,61 @@ fn enrich_russian_summary_from_wikipedia(
         }
     }
 
-    // 2. Fallback: Russian Wikipedia search by cleaned Russian title + year
-    if !clean_ru.trim().is_empty() && contains_cyrillic(clean_ru) {
-        let q_str = match year {
-            Some(y) if !y.is_empty() => format!("{} {y} фильм", clean_ru.trim()),
-            _ => format!("{} фильм", clean_ru.trim()),
-        };
+    // 2. Fallback: Russian Wikipedia search by cleaned Russian title, then English title
+    let mut queries: Vec<String> = Vec::new();
+    let ru_trimmed = clean_ru.trim();
+    if !ru_trimmed.is_empty() && contains_cyrillic(ru_trimmed) {
+        if let Some(y) = year.filter(|s| !s.is_empty()) {
+            queries.push(format!("{ru_trimmed} {y}"));
+        }
+        queries.push(ru_trimmed.to_string());
+    }
+    if let Some(en) = clean_en.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(y) = year.filter(|s| !s.is_empty()) {
+            queries.push(format!("{en} {y}"));
+        }
+        queries.push(en.to_string());
+    }
+
+    for q_str in queries {
         let wp_url = format!(
-            "https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={}&format=json&srlimit=1",
+            "https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={}&format=json&srlimit=3",
             urlencoding::encode(&q_str)
         );
         if let Ok(resp) = client.get(&wp_url).send() {
             if let Ok(v) = resp.json::<Value>() {
-                if let Some(page_title) = v
+                if let Some(arr) = v
                     .get("query")
                     .and_then(|q| q.get("search"))
                     .and_then(|s| s.as_array())
-                    .and_then(|a| a.first())
-                    .and_then(|it| it.get("title"))
-                    .and_then(|t| t.as_str())
                 {
-                    if let Some(summary) = fetch_ruwiki_summary(client, page_title) {
-                        meta.description = summary;
-                        if !meta.source_label.contains("Wikipedia") {
-                            meta.source_label = if meta.source_label.is_empty() {
-                                "Wikipedia".to_string()
-                            } else {
-                                format!("{} + Wikipedia", meta.source_label)
-                            };
+                    for item in arr {
+                        if let Some(page_title) = item.get("title").and_then(|t| t.as_str()) {
+                            let low_t = page_title.to_lowercase();
+                            let snippet = item
+                                .get("snippet")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+                            let looks_media = low_t.contains("фильм")
+                                || low_t.contains("сериал")
+                                || snippet.contains("фильм")
+                                || snippet.contains("сериал")
+                                || snippet.contains("телесериал")
+                                || year.map(|y| snippet.contains(y)).unwrap_or(false)
+                                || arr.len() == 1;
+                            if looks_media && apply_ruwiki_page(client, page_title, meta) {
+                                return;
+                            }
+                        }
+                    }
+                    if let Some(first_title) = arr
+                        .first()
+                        .and_then(|it| it.get("title"))
+                        .and_then(|t| t.as_str())
+                    {
+                        if apply_ruwiki_page(client, first_title, meta) {
+                            return;
                         }
                     }
                 }
@@ -1078,7 +1139,44 @@ fn enrich_russian_summary_from_wikipedia(
     }
 }
 
-fn fetch_ruwiki_summary(client: &Client, page_title: &str) -> Option<String> {
+fn apply_ruwiki_page(client: &Client, page_title: &str, meta: &mut TorrentRichMetadata) -> bool {
+    let Some((ru_title, summary, img_opt)) = fetch_ruwiki_summary(client, page_title) else {
+        return false;
+    };
+    if meta.description.is_empty() || !contains_cyrillic(&meta.description) {
+        meta.description = summary;
+    }
+    if !contains_cyrillic(&meta.title) && contains_cyrillic(&ru_title) {
+        let stripped = ru_title
+            .split(" (")
+            .next()
+            .unwrap_or(&ru_title)
+            .trim();
+        if !stripped.is_empty() {
+            meta.title = stripped.to_string();
+        }
+    }
+    if meta.poster_url.is_empty() {
+        if let Some(img) = img_opt {
+            if img.starts_with("http") {
+                meta.poster_url = img;
+            }
+        }
+    }
+    if !meta.source_label.contains("Wikipedia") {
+        meta.source_label = if meta.source_label.is_empty() {
+            "Wikipedia".to_string()
+        } else {
+            format!("{} + Wikipedia", meta.source_label)
+        };
+    }
+    true
+}
+
+fn fetch_ruwiki_summary(
+    client: &Client,
+    page_title: &str,
+) -> Option<(String, String, Option<String>)> {
     let url = format!(
         "https://ru.wikipedia.org/api/rest_v1/page/summary/{}",
         urlencoding::encode(page_title.replace(' ', "_").as_str())
@@ -1092,7 +1190,19 @@ fn fetch_ruwiki_summary(client: &Client, page_title: &str) -> Option<String> {
     if extract.len() < 30 {
         return None;
     }
-    Some(extract.to_string())
+    let title = v
+        .get("title")
+        .and_then(|x| x.as_str())
+        .unwrap_or(page_title)
+        .trim()
+        .to_string();
+    let img = v
+        .get("thumbnail")
+        .and_then(|t| t.get("source"))
+        .or_else(|| v.get("originalimage").and_then(|t| t.get("source")))
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+    Some((title, extract.to_string(), img))
 }
 
 fn resize_amazon_image_url(url: &str, width: u32) -> String {
@@ -1172,9 +1282,9 @@ fn clean_release_segment(seg: &str) -> String {
         "blu-ray", "web-dl", "webdl", "web-dlrip", "webrip", "hdrip", "hdtv", "dvdrip", "hdr",
         "hdr10", "dovi", "hevc", "h264", "h265", "x264", "x265", "10bit", "8bit", "ac3", "dts",
         "aac", "rus", "eng", "sub", "dub", "lostfilm", "hdrezka", "jaskier", "red", "season",
-        "сезон", "серии", "дубляж", "лицензия", "itunes",
+        "сезон", "серии", "дубляж", "лицензия", "itunes", "remux", "truehd",
     ];
-    let normalized = seg.replace('.', " ").replace('_', " ");
+    let normalized = split_glued_release_tags(&seg.replace('.', " ").replace('_', " "));
     let mut kept = Vec::new();
     for word in normalized.split_whitespace() {
         let low = word.to_lowercase();
@@ -1204,6 +1314,62 @@ fn clean_release_segment(seg: &str) -> String {
     kept.join(" ")
         .trim_matches(|c: char| c == '-' || c == '|' || c == ',' || c.is_whitespace())
         .to_string()
+}
+
+fn split_glued_release_tags(input: &str) -> String {
+    let mut s = input.to_string();
+    // Separate glued S01..S99 season tags (e.g. GangsterlendS01WEBDL2160p -> Gangsterlend S01WEBDL2160p)
+    let split_pos = {
+        let bytes = s.as_bytes();
+        (1..bytes.len().saturating_sub(2)).find(|&i| {
+            (bytes[i] == b'S' || bytes[i] == b's')
+                && bytes[i - 1].is_ascii_alphabetic()
+                && bytes[i + 1].is_ascii_digit()
+                && bytes[i + 2].is_ascii_digit()
+        })
+    };
+    if let Some(pos) = split_pos {
+        s.insert(pos, ' ');
+    }
+    for marker in [
+        "2160p", "1080p", "720p", "480p", "WEBDL", "WEB-DL", "WEBRip", "BluRay", "BDRip",
+        "BDRemux", "REMUX", "HEVC", "HDTV", "HDRip", "DVDRip",
+    ] {
+        if let Some(idx) = s.find(marker) {
+            if idx > 0 && !s[..idx].ends_with(' ') {
+                s.insert(idx, ' ');
+            }
+        }
+    }
+    s
+}
+
+fn split_camel_case(input: &str) -> String {
+    if input.contains(' ') {
+        return input.to_string();
+    }
+    let mut out = String::with_capacity(input.len() + 4);
+    let mut prev_lower = false;
+    for ch in input.chars() {
+        if prev_lower && ch.is_ascii_uppercase() {
+            out.push(' ');
+        }
+        out.push(ch);
+        prev_lower = ch.is_ascii_lowercase();
+    }
+    out
+}
+
+pub fn extract_rutracker_topic_id_from_filename(raw: &str) -> Option<String> {
+    let low = raw.to_lowercase();
+    let idx = low.find("rutracker-")?;
+    let rest = &low[idx + "rutracker-".len()..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.len() >= 4 {
+        Some(digits)
+    } else {
+        None
+    }
 }
 
 fn contains_cyrillic(s: &str) -> bool {

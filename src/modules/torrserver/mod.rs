@@ -18,11 +18,13 @@ use crate::modules::torrserver::api::{
 };
 use crate::modules::torrserver::clipboard::ClipboardWatcher;
 use crate::modules::torrserver::metadata::{
-    fetch_rich_metadata, DecodedRgbaImage, TorrentRichMetadata,
+    extract_rutracker_topic_id_from_filename, fetch_rich_metadata, DecodedRgbaImage,
+    TorrentRichMetadata,
 };
 use crate::modules::torrserver::player::{
-    detect_installed_players, is_video_filename, launch_player, load_history, resolve_player_exe,
-    save_history, upsert_history_watch, write_m3u_playlist, DetectedPlayer, HistoryRecord,
+    detect_installed_players, is_video_filename, launch_player, load_history, open_with_os_default,
+    resolve_player_exe, save_history, upsert_history_watch, write_m3u_playlist, DetectedPlayer,
+    HistoryRecord,
 };
 use crate::modules::torrserver::rutracker::{RuTrackerClient, RuTrackerPayload};
 use crate::modules::torrserver::server_manager::{
@@ -202,7 +204,7 @@ impl AppModule for TorrServerModule {
                         };
                         let title = t.display_title();
                         let ts = record_torrent_timestamp(&shared_add, &hash, t.timestamp);
-                        record_torrent_origin(&shared_add, &hash, Some(&magnet), None, None, None);
+                        record_torrent_origin(&shared_add, &hash, Some(&magnet), None, None, None, None);
                         record_saved_torrent(
                             &shared_add,
                             &hash,
@@ -880,7 +882,7 @@ impl AppModule for TorrServerModule {
                                     None
                                 };
                                 let ts = record_torrent_timestamp(&s, &h, t.timestamp);
-                                record_torrent_origin(&s, &h, mag_opt, None, None, None);
+                                record_torrent_origin(&s, &h, mag_opt, None, None, None, Some(&disp));
                                 record_saved_torrent(
                                     &s,
                                     &h,
@@ -1815,6 +1817,7 @@ fn add_and_optionally_play(
                 final_tracker_url.as_deref(),
                 rt_topic_id.as_ref().map(|_| "RuTracker"),
                 rt_topic_id.as_deref(),
+                title.or(Some(disp.as_str())),
             );
             let saved_torrent_file = uploaded_bytes_copy
                 .as_deref()
@@ -1850,7 +1853,8 @@ fn add_and_optionally_play(
 }
 
 fn upload_torrent_files(shared: &Arc<TorrServerShared>, paths: &[PathBuf]) {
-    let api = TorrServerApi::from_config(&shared.ts_config());
+    let cfg = shared.ts_config();
+    let api = TorrServerApi::from_config(&cfg);
     let mut last_hash = String::new();
     for p in paths {
         let bytes = match std::fs::read(p) {
@@ -1868,6 +1872,21 @@ fn upload_torrent_files(shared: &Arc<TorrServerShared>, paths: &[PathBuf]) {
             .and_then(|n| n.to_str())
             .unwrap_or("upload.torrent")
             .to_string();
+        let file_stem = p
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let file_rt_id = extract_rutracker_topic_id_from_filename(&filename);
+        let effective_tracker_url = comment_url.or_else(|| {
+            file_rt_id.as_ref().map(|tid| {
+                format!(
+                    "{}/forum/viewtopic.php?t={tid}",
+                    cfg.effective_rutracker_mirror()
+                )
+            })
+        });
         let bytes_copy = bytes.clone();
         match api.upload_torrent_bytes(bytes, filename) {
             Ok(t) => {
@@ -1877,9 +1896,10 @@ fn upload_torrent_files(shared: &Arc<TorrServerShared>, paths: &[PathBuf]) {
                     shared,
                     &t.hash,
                     None,
-                    comment_url.as_deref(),
-                    None,
-                    None,
+                    effective_tracker_url.as_deref(),
+                    file_rt_id.as_ref().map(|_| "RuTracker"),
+                    file_rt_id.as_deref(),
+                    (!file_stem.is_empty()).then_some(file_stem.as_str()),
                 );
                 let saved_torrent_file =
                     save_torrent_bytes_to_disk(&shared.paths.ts_torrents_dir, &t.hash, &bytes_copy);
@@ -1950,22 +1970,27 @@ fn play_torrent_file(shared: &Arc<TorrServerShared>, hash: &str, requested_file_
         .unwrap_or("stream.mkv");
     let stream_url = api.stream_url(hash, file.id, base_name);
 
-    let player_res = {
-        let detected = shared.detected_players.lock().map(|d| d.clone()).unwrap_or_default();
-        let idx = detected
-            .iter()
-            .position(|p| p.id == cfg.player_id)
-            .unwrap_or(0);
-        resolve_player_exe(&cfg.player_custom_path, idx, &detected)
+    let player_res = resolve_or_rescan_player(shared, &cfg);
+
+    let launched = match player_res {
+        Ok(exe) => launch_player(&exe, &stream_url, &cfg.player_args),
+        Err(e) if cfg.player_custom_path.trim().is_empty() => {
+            // Last-resort Windows shell fallback: write 1-track .m3u so OS default media app (e.g. Win11 UWP Media Player) opens the stream
+            let single_key = format!("{}_{}", hash.trim(), file.id);
+            match write_m3u_playlist(
+                &shared.paths.ts_playlists_dir,
+                &single_key,
+                &[(base_name.to_string(), stream_url.clone())],
+            ) {
+                Ok(m3u_path) => open_with_os_default(&m3u_path),
+                Err(_) => Err(e),
+            }
+        }
+        Err(e) => Err(e),
     };
 
-    match player_res {
-        Ok(exe) => {
-            if let Err(e) = launch_player(&exe, &stream_url, &cfg.player_args) {
-                diagnostics::error("[TS:PLAYER]", e.clone());
-                shared.toast(e);
-                return;
-            }
+    match launched {
+        Ok(_) => {
             let magnet = resolve_best_magnet(shared, hash);
             let video_count = files.iter().filter(|f| is_video_filename(&f.path)).count();
             if let Ok(mut hist) = shared.history.lock() {
@@ -2047,23 +2072,19 @@ fn play_torrent_m3u(shared: &Arc<TorrServerShared>, hash: &str) {
         }
     };
 
-    let player_res = {
-        let detected = shared.detected_players.lock().map(|d| d.clone()).unwrap_or_default();
-        let idx = detected
-            .iter()
-            .position(|p| p.id == cfg.player_id)
-            .unwrap_or(0);
-        resolve_player_exe(&cfg.player_custom_path, idx, &detected)
-    };
+    let player_res = resolve_or_rescan_player(shared, &cfg);
 
-    match player_res {
+    let launched = match player_res {
         Ok(exe) => {
             let target = m3u_path.to_string_lossy().to_string();
-            if let Err(e) = launch_player(&exe, &target, &cfg.player_args) {
-                diagnostics::error("[TS:PLAYER]", e.clone());
-                shared.toast(e);
-                return;
-            }
+            launch_player(&exe, &target, &cfg.player_args)
+        }
+        Err(e) if cfg.player_custom_path.trim().is_empty() => open_with_os_default(&m3u_path),
+        Err(e) => Err(e),
+    };
+
+    match launched {
+        Ok(_) => {
             shared.toast(format!("Плейлист из {} серий открыт в плеере", entries.len()));
         }
         Err(e) => {
@@ -2071,6 +2092,33 @@ fn play_torrent_m3u(shared: &Arc<TorrServerShared>, hash: &str) {
             shared.toast(e);
         }
     }
+}
+
+fn resolve_or_rescan_player(
+    shared: &Arc<TorrServerShared>,
+    cfg: &TorrServerConfig,
+) -> Result<PathBuf, String> {
+    let mut detected = shared
+        .detected_players
+        .lock()
+        .map(|d| d.clone())
+        .unwrap_or_default();
+
+    if detected.is_empty() && cfg.player_custom_path.trim().is_empty() {
+        let rescanned = detect_installed_players();
+        if !rescanned.is_empty() {
+            if let Ok(mut guard) = shared.detected_players.lock() {
+                *guard = rescanned.clone();
+            }
+            detected = rescanned;
+        }
+    }
+
+    let idx = detected
+        .iter()
+        .position(|p| p.id == cfg.player_id)
+        .unwrap_or(0);
+    resolve_player_exe(&cfg.player_custom_path, idx, &detected)
 }
 
 fn maybe_run_watchdog(shared: &Arc<TorrServerShared>, consec_echo_fail: &mut u32) {
@@ -2749,9 +2797,9 @@ fn sync_players_to_ui(shared: &Arc<TorrServerShared>, ui: &AppWindow) {
         .collect();
 
     if presets.is_empty() {
-        presets.push("Автопоиск: плееры не найдены".into());
+        presets.push("Системный плеер Windows (по умолчанию для .m3u)".into());
         ui.set_player_detect_status(
-            "PotPlayer / MPV / VLC / MPC не найдены автоматически — выберите .exe вручную."
+            "Внешний плеер не найден — при запуске используется системный обработчик Windows (.m3u) либо укажите .exe вручную."
                 .into(),
         );
     } else {
@@ -3170,6 +3218,7 @@ fn record_torrent_origin(
     tracker_url: Option<&str>,
     tracker_name: Option<&str>,
     rt_topic_id: Option<&str>,
+    source_title: Option<&str>,
 ) {
     let key = hash.trim().to_lowercase();
     if key.is_empty() {
@@ -3203,6 +3252,13 @@ fn record_torrent_origin(
         if let Some(tid) = rt_topic_id {
             if !tid.trim().is_empty() && entry.rutracker_topic_id != tid.trim() {
                 entry.rutracker_topic_id = tid.trim().to_string();
+                changed = true;
+            }
+        }
+        if let Some(st) = source_title {
+            let trimmed = st.trim();
+            if !trimmed.is_empty() && entry.source_title != trimmed {
+                entry.source_title = trimmed.to_string();
                 changed = true;
             }
         }
@@ -3384,6 +3440,7 @@ fn load_torrent_details_async(shared: &Arc<TorrServerShared>, hash: &str, force_
                     &target_hash,
                     None,
                     Some(&payload.meta.tracker_url),
+                    None,
                     None,
                     None,
                 );
