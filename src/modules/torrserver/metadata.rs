@@ -7,7 +7,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -181,9 +181,10 @@ pub fn fetch_rich_metadata(
     }
 
     if meta.description.is_empty() || !contains_cyrillic(&meta.description) {
+        let imdb_id_copy = meta.imdb_id.clone();
         enrich_russian_summary_from_wikipedia(
             &http,
-            &meta.imdb_id,
+            &imdb_id_copy,
             &clean_ru,
             parsed_year.as_deref(),
             &mut meta,

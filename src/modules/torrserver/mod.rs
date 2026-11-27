@@ -552,7 +552,7 @@ impl AppModule for TorrServerModule {
                     .cached_torrents
                     .lock()
                     .ok()
-                    .and_then(|list| list.into_iter().find(|t| t.hash == h));
+                    .and_then(|list| list.iter().find(|t| t.hash == h).cloned());
                 let added_ts = shared
                     .torrents_meta
                     .lock()
