@@ -169,7 +169,7 @@ pub struct TorrServerApi {
 impl TorrServerApi {
     pub fn from_config(cfg: &TorrServerConfig) -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(7))
+            .timeout(Duration::from_secs(10))
             .build()
             .unwrap_or_else(|_| Client::new());
         Self {
@@ -510,15 +510,31 @@ impl TorrServerApi {
 
     pub fn shutdown_server(&self) -> Result<(), String> {
         let short_client = Client::builder()
-            .timeout(Duration::from_millis(800))
+            .timeout(Duration::from_millis(1500))
             .build()
             .unwrap_or_else(|_| Client::new());
         let url = format!("{}/shutdown", self.base_url);
-        let mut req = short_client.post(&url);
-        if !self.username.is_empty() || !self.password.is_empty() {
-            req = req.basic_auth(&self.username, Some(&self.password));
+        let send_shutdown = |is_post: bool| {
+            let req = if is_post {
+                short_client.post(&url)
+            } else {
+                short_client.get(&url)
+            };
+            let req = if !self.username.is_empty() || !self.password.is_empty() {
+                req.basic_auth(&self.username, Some(&self.password))
+            } else {
+                req
+            };
+            req.send()
+        };
+
+        // TorrServer MatriX exposes GET /shutdown; fallback to POST only on 404/405 for custom forks.
+        match send_shutdown(false) {
+            Ok(resp) if matches!(resp.status().as_u16(), 404 | 405) => {
+                let _ = send_shutdown(true);
+            }
+            _ => {}
         }
-        let _ = req.send();
         Ok(())
     }
 

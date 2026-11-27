@@ -296,6 +296,17 @@ impl ServerManager {
             *guard = Some(child);
         }
 
+        // Wait briefly for the HTTP API to start listening (up to ~1.2s, exits immediately once ready)
+        for _ in 0..8 {
+            if self.child_running_state() == Some(false) {
+                break;
+            }
+            if probe_api.echo().is_ok() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+
         diagnostics::info(
             "[TS:ENGINE]",
             format!(
@@ -316,12 +327,12 @@ impl ServerManager {
 
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
-                for _ in 0..10 {
+                for _ in 0..30 {
                     if let Ok(Some(_)) = child.try_wait() {
                         diagnostics::info("[TS:ENGINE]", "Движок штатно остановлен");
                         return;
                     }
-                    thread::sleep(Duration::from_millis(80));
+                    thread::sleep(Duration::from_millis(100));
                 }
                 let _ = child.kill();
                 let _ = child.wait();
@@ -333,7 +344,7 @@ impl ServerManager {
         // Wait briefly in case an external/reattached local TorrServer is shutting down from /shutdown
         if cfg.mode == 0 {
             let api = TorrServerApi::from_config(cfg);
-            for _ in 0..8 {
+            for _ in 0..12 {
                 if api.echo().is_err() {
                     break;
                 }

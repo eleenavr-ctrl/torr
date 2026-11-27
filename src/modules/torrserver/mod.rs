@@ -8,10 +8,13 @@ pub mod server_manager;
 
 use crate::core;
 use crate::core::diagnostics;
-use crate::core::storage::{save_config, AppConfig, PortablePaths, TorrServerConfig, TorrentOriginMeta};
+use crate::core::storage::{
+    save_config, AppConfig, PortablePaths, SavedTorrentTask, TorrServerConfig, TorrentOriginMeta,
+};
 use crate::modules::torrserver::api::{
     extract_torrent_comment_url, format_bytes, format_speed, format_unix_datetime_short,
-    parse_backup_json, ApiSearchResult, ApiTorrent, TorrServerApi, TorrServerEngineSettings,
+    parse_backup_json, ApiSearchResult, ApiTorrent, TorrentBackupItem, TorrServerApi,
+    TorrServerEngineSettings,
 };
 use crate::modules::torrserver::clipboard::ClipboardWatcher;
 use crate::modules::torrserver::metadata::{
@@ -48,6 +51,10 @@ struct TorrServerShared {
     cached_torrents: Mutex<Vec<ApiTorrent>>,
     torrents_meta: Mutex<HashMap<String, i64>>,
     torrents_links: Mutex<HashMap<String, TorrentOriginMeta>>,
+    saved_torrents: Mutex<HashMap<String, SavedTorrentTask>>,
+    server_seen_hashes: Mutex<HashSet<String>>,
+    needs_server_restore: AtomicBool,
+    restore_lock: Mutex<()>,
     detail_meta_cache: Mutex<HashMap<String, TorrentRichMetadata>>,
     detail_generation: Arc<AtomicU64>,
     selected_hash: Mutex<String>,
@@ -112,6 +119,8 @@ impl TorrServerModule {
         let history = load_history(&paths.ts_history_path);
         let torrents_meta = load_torrents_meta(&paths.ts_torrents_meta_path);
         let torrents_links = load_torrents_links(&paths.ts_torrents_links_path);
+        let saved_torrents = load_torrents_saved(&paths.ts_torrents_saved_path);
+        let initial_cached = build_placeholder_torrents(&saved_torrents);
         let players = detect_installed_players();
         let server = ServerManager::new(paths.clone());
         let rutracker = RuTrackerClient::new(paths.ts_webview_dir.clone());
@@ -124,9 +133,13 @@ impl TorrServerModule {
             window_visible: Arc::new(AtomicBool::new(true)),
             poll_stop: Arc::new(AtomicBool::new(false)),
             engine_updating: Arc::new(AtomicBool::new(false)),
-            cached_torrents: Mutex::new(Vec::new()),
+            cached_torrents: Mutex::new(initial_cached),
             torrents_meta: Mutex::new(torrents_meta),
             torrents_links: Mutex::new(torrents_links),
+            saved_torrents: Mutex::new(saved_torrents),
+            server_seen_hashes: Mutex::new(HashSet::new()),
+            needs_server_restore: AtomicBool::new(true),
+            restore_lock: Mutex::new(()),
             detail_meta_cache: Mutex::new(HashMap::new()),
             detail_generation: Arc::new(AtomicU64::new(0)),
             selected_hash: Mutex::new(String::new()),
@@ -182,9 +195,24 @@ impl AppModule for TorrServerModule {
                 let api = TorrServerApi::from_config(&shared_add.ts_config());
                 match api.add_magnet(&magnet, None) {
                     Ok(t) => {
+                        let hash = if !t.hash.trim().is_empty() {
+                            t.hash.clone()
+                        } else {
+                            extract_btih(&magnet).unwrap_or_default()
+                        };
                         let title = t.display_title();
-                        record_torrent_timestamp(&shared_add, &t.hash, t.timestamp);
-                        record_torrent_origin(&shared_add, &t.hash, Some(&magnet), None, None, None);
+                        let ts = record_torrent_timestamp(&shared_add, &hash, t.timestamp);
+                        record_torrent_origin(&shared_add, &hash, Some(&magnet), None, None, None);
+                        record_saved_torrent(
+                            &shared_add,
+                            &hash,
+                            &title,
+                            Some(&magnet),
+                            None,
+                            &t.poster,
+                            &t.data,
+                            ts,
+                        );
                         shared_add.toast(format!("Добавлено из буфера: {title}"));
                         refresh_torrents_and_status(&shared_add);
                     }
@@ -212,14 +240,15 @@ impl AppModule for TorrServerModule {
         thread::Builder::new()
             .name("ts-ui-poller".to_string())
             .spawn(move || {
-                // Give engine a brief moment to boot on startup
-                thread::sleep(Duration::from_millis(700));
+                // Give engine a brief moment to boot on startup if not yet listening
+                thread::sleep(Duration::from_millis(450));
                 sync_engine_settings_from_server(&shared_poll);
                 let mut bg_watchdog_ticks = 0u32;
                 let mut consec_echo_fail = 0u32;
                 while !shared_poll.poll_stop.load(Ordering::Relaxed) {
                     let visible = shared_poll.window_visible.load(Ordering::Relaxed);
-                    if visible {
+                    let needs_restore = shared_poll.needs_server_restore.load(Ordering::SeqCst);
+                    if visible || needs_restore {
                         refresh_torrents_and_status(&shared_poll);
                         maybe_run_watchdog(&shared_poll, &mut consec_echo_fail);
                         thread::sleep(Duration::from_millis(1600));
@@ -290,6 +319,7 @@ impl AppModule for TorrServerModule {
         sync_releases_to_ui(&self.shared, ui);
         sync_players_to_ui(&self.shared, ui);
         sync_history_to_ui(&self.shared, ui);
+        push_torrents_to_ui(&self.shared);
 
         // 1. Add Magnet
         {
@@ -411,22 +441,32 @@ impl AppModule for TorrServerModule {
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
                     let api = TorrServerApi::from_config(&s.ts_config());
-                    match api.remove_torrent(&h) {
-                        Ok(_) => {
-                            diagnostics::info("[TS:API]", format!("Раздача удалена: {h}"));
-                            if let Ok(mut sel) = s.selected_hash.lock() {
-                                if *sel == h {
-                                    sel.clear();
-                                    clear_detail_ui(&s);
-                                }
+                    let rem_res = api.remove_torrent(&h);
+                    let removed_or_absent = match &rem_res {
+                        Ok(_) => true,
+                        Err(_) => {
+                            // If server is offline or no longer has this hash, still allow removing from local store.
+                            api.echo().is_err() || api.get_torrent(&h).is_err()
+                        }
+                    };
+
+                    if removed_or_absent {
+                        remove_saved_torrent(&s, &h);
+                        if let Ok(mut cache) = s.cached_torrents.lock() {
+                            cache.retain(|t| !t.hash.eq_ignore_ascii_case(&h));
+                        }
+                        diagnostics::info("[TS:API]", format!("Раздача удалена: {h}"));
+                        if let Ok(mut sel) = s.selected_hash.lock() {
+                            if sel.eq_ignore_ascii_case(&h) {
+                                sel.clear();
+                                clear_detail_ui(&s);
                             }
-                            s.toast("Раздача удалена");
-                            refresh_torrents_and_status(&s);
                         }
-                        Err(e) => {
-                            diagnostics::error("[TS:API]", e.clone());
-                            s.toast(e);
-                        }
+                        s.toast("Раздача удалена");
+                        refresh_torrents_and_status(&s);
+                    } else if let Err(e) = rem_res {
+                        diagnostics::error("[TS:API]", e.clone());
+                        s.toast(e);
                     }
                 });
             });
@@ -822,7 +862,36 @@ impl AppModule for TorrServerModule {
 
                     for item in &items {
                         match api.add_backup_item(item) {
-                            Ok(_) => ok_count += 1,
+                            Ok(t) => {
+                                ok_count += 1;
+                                let h = if !t.hash.trim().is_empty() {
+                                    t.hash.clone()
+                                } else {
+                                    item.hash.clone()
+                                };
+                                let disp = if !t.display_title().trim().is_empty() && t.display_title() != h {
+                                    t.display_title()
+                                } else {
+                                    item.title.clone()
+                                };
+                                let mag_opt = if !item.magnet.trim().is_empty() {
+                                    Some(item.magnet.as_str())
+                                } else {
+                                    None
+                                };
+                                let ts = record_torrent_timestamp(&s, &h, t.timestamp);
+                                record_torrent_origin(&s, &h, mag_opt, None, None, None);
+                                record_saved_torrent(
+                                    &s,
+                                    &h,
+                                    &disp,
+                                    mag_opt,
+                                    None,
+                                    if !t.poster.is_empty() { &t.poster } else { &item.poster },
+                                    if !t.data.is_empty() { &t.data } else { &item.data },
+                                    ts,
+                                );
+                            }
                             Err(e) => {
                                 err_count += 1;
                                 diagnostics::warn(
@@ -1057,8 +1126,10 @@ impl AppModule for TorrServerModule {
                         let cfg = s.ts_config();
                         let high_prio = s.keep_in_memory();
                         if cfg.mode == 0 {
+                            reset_server_sync_state(&s);
                             let _ = s.server.restart(&cfg, high_prio);
                         } else {
+                            reset_server_sync_state(&s);
                             s.server.stop(&cfg);
                         }
                         thread::sleep(Duration::from_millis(400));
@@ -1081,6 +1152,7 @@ impl AppModule for TorrServerModule {
                 thread::spawn(move || {
                     let cfg = s.ts_config();
                     let high_prio = s.keep_in_memory();
+                    reset_server_sync_state(&s);
                     match s.server.restart(&cfg, high_prio) {
                         Ok(_) => s.toast("Движок TorrServer перезапущен"),
                         Err(e) => s.toast(e),
@@ -1206,6 +1278,7 @@ impl AppModule for TorrServerModule {
                                 }
                             });
                             if ok {
+                                reset_server_sync_state(&s);
                                 thread::sleep(Duration::from_millis(600));
                                 refresh_torrents_and_status(&s);
                             }
@@ -1229,6 +1302,7 @@ impl AppModule for TorrServerModule {
                     };
                     let cfg = s.ts_config();
                     let high_prio = s.keep_in_memory();
+                    reset_server_sync_state(&s);
                     match s.server.install_local_exe(&cfg, &path, high_prio) {
                         Ok(_) => {
                             let final_exists = s.server.binary_exists();
@@ -1609,6 +1683,7 @@ impl AppModule for TorrServerModule {
                 thread::spawn(move || {
                     let cfg = s.ts_config();
                     let high_prio = s.keep_in_memory();
+                    reset_server_sync_state(&s);
                     let _ = s.server.restart(&cfg, high_prio);
                     thread::sleep(Duration::from_millis(500));
                     refresh_torrents_and_status(&s);
@@ -1681,6 +1756,7 @@ fn add_and_optionally_play(
 
     let mut extracted_comment_url: Option<String> = None;
     let mut rt_topic_id: Option<String> = None;
+    let mut uploaded_bytes_copy: Option<Vec<u8>> = None;
     let mut saved_magnet: Option<String> = if link.starts_with("magnet:") {
         Some(link.to_string())
     } else {
@@ -1693,6 +1769,7 @@ fn add_and_optionally_play(
         match shared.rutracker.fetch_torrent_or_magnet(&cfg, topic_id) {
             Ok(RuTrackerPayload::TorrentBytes { bytes, filename }) => {
                 extracted_comment_url = extract_torrent_comment_url(&bytes);
+                uploaded_bytes_copy = Some(bytes.clone());
                 api.upload_torrent_bytes(bytes, filename)
             }
             Ok(RuTrackerPayload::Magnet(magnet)) => {
@@ -1707,9 +1784,22 @@ fn add_and_optionally_play(
 
     match result {
         Ok(t) => {
-            let hash = t.hash.clone();
-            let disp = t.display_title();
-            record_torrent_timestamp(shared, &hash, t.timestamp);
+            let hash = if !t.hash.trim().is_empty() {
+                t.hash.clone()
+            } else {
+                saved_magnet
+                    .as_deref()
+                    .and_then(extract_btih)
+                    .unwrap_or_default()
+            };
+            let disp = if !t.display_title().trim().is_empty() && t.display_title() != hash {
+                t.display_title()
+            } else if let Some(custom) = title.filter(|s| !s.trim().is_empty()) {
+                custom.trim().to_string()
+            } else {
+                hash.clone()
+            };
+            let ts = record_torrent_timestamp(shared, &hash, t.timestamp);
             let final_tracker_url = page_url
                 .map(|s| s.to_string())
                 .or(extracted_comment_url)
@@ -1725,6 +1815,19 @@ fn add_and_optionally_play(
                 final_tracker_url.as_deref(),
                 rt_topic_id.as_ref().map(|_| "RuTracker"),
                 rt_topic_id.as_deref(),
+            );
+            let saved_torrent_file = uploaded_bytes_copy
+                .as_deref()
+                .and_then(|bytes| save_torrent_bytes_to_disk(&shared.paths.ts_torrents_dir, &hash, bytes));
+            record_saved_torrent(
+                shared,
+                &hash,
+                &disp,
+                saved_magnet.as_deref(),
+                saved_torrent_file.as_deref(),
+                &t.poster,
+                &t.data,
+                ts,
             );
             diagnostics::info("[TS:API]", format!("Добавлена раздача: {disp} ({hash})"));
             if let Ok(mut sel) = shared.selected_hash.lock() {
@@ -1765,10 +1868,11 @@ fn upload_torrent_files(shared: &Arc<TorrServerShared>, paths: &[PathBuf]) {
             .and_then(|n| n.to_str())
             .unwrap_or("upload.torrent")
             .to_string();
+        let bytes_copy = bytes.clone();
         match api.upload_torrent_bytes(bytes, filename) {
             Ok(t) => {
                 let disp = t.display_title();
-                record_torrent_timestamp(shared, &t.hash, t.timestamp);
+                let ts = record_torrent_timestamp(shared, &t.hash, t.timestamp);
                 record_torrent_origin(
                     shared,
                     &t.hash,
@@ -1776,6 +1880,18 @@ fn upload_torrent_files(shared: &Arc<TorrServerShared>, paths: &[PathBuf]) {
                     comment_url.as_deref(),
                     None,
                     None,
+                );
+                let saved_torrent_file =
+                    save_torrent_bytes_to_disk(&shared.paths.ts_torrents_dir, &t.hash, &bytes_copy);
+                record_saved_torrent(
+                    shared,
+                    &t.hash,
+                    &disp,
+                    None,
+                    saved_torrent_file.as_deref(),
+                    &t.poster,
+                    &t.data,
+                    ts,
                 );
                 diagnostics::info("[TS:API]", format!("Загружен .torrent: {disp}"));
                 if let Ok(mut sel) = shared.selected_hash.lock() {
@@ -1988,6 +2104,7 @@ fn maybe_run_watchdog(shared: &Arc<TorrServerShared>, consec_echo_fail: &mut u32
                     "Локальный движок TorrServer выгрузился или не отвечает — автоматический перезапуск",
                 );
                 let high_prio = shared.keep_in_memory();
+                reset_server_sync_state(shared);
                 if let Err(e) = shared.server.start(&cfg, high_prio) {
                     diagnostics::error("[TS:WATCHDOG]", format!("Не удалось перезапустить движок: {e}"));
                 } else {
@@ -2090,8 +2207,10 @@ fn refresh_torrents_and_status(shared: &Arc<TorrServerShared>) {
             status.state_label = format!("Подключён ({ping_ms} мс)");
             status.version_label = ver;
 
+            let _sync_guard = shared.restore_lock.lock();
             match api.list_torrents() {
-                Ok(list) => {
+                Ok(mut list) => {
+                    reconcile_torrents_with_server(shared, &api, &mut list);
                     let total_speed: f64 = list.iter().map(|t| t.download_speed).sum();
                     status.speed_label = format_speed(total_speed);
                     status.active_count = list.len() as i32;
@@ -2692,6 +2811,354 @@ fn save_torrents_links(path: &Path, map: &HashMap<String, TorrentOriginMeta>) {
                 let _ = std::fs::remove_file(path);
             }
             let _ = std::fs::rename(&tmp, path);
+        }
+    }
+}
+
+fn load_torrents_saved(path: &Path) -> HashMap<String, SavedTorrentTask> {
+    if !path.exists() {
+        return HashMap::new();
+    }
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<HashMap<String, SavedTorrentTask>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_torrents_saved(path: &Path, map: &HashMap<String, SavedTorrentTask>) {
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        let tmp = path.with_extension("json.tmp");
+        if let Err(e) = std::fs::write(&tmp, json) {
+            diagnostics::warn("[TS:SYNC]", format!("Не удалось записать {}: {e}", tmp.display()));
+            return;
+        }
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Err(e) = std::fs::rename(&tmp, path) {
+            diagnostics::warn("[TS:SYNC]", format!("Не удалось сохранить {}: {e}", path.display()));
+        }
+    }
+}
+
+fn build_placeholder_torrents(saved: &HashMap<String, SavedTorrentTask>) -> Vec<ApiTorrent> {
+    let mut list: Vec<ApiTorrent> = saved
+        .values()
+        .filter(|t| !t.hash.trim().is_empty())
+        .map(|t| ApiTorrent {
+            hash: t.hash.clone(),
+            title: t.title.clone(),
+            timestamp: t.added_ts,
+            stat_string: "Загрузка движка...".to_string(),
+            poster: t.poster.clone(),
+            data: t.data.clone(),
+            ..Default::default()
+        })
+        .collect();
+    list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    list
+}
+
+fn save_torrent_bytes_to_disk(torrents_dir: &Path, hash: &str, bytes: &[u8]) -> Option<String> {
+    let key = hash.trim().to_lowercase();
+    if key.is_empty() || bytes.is_empty() {
+        return None;
+    }
+    let filename = format!("{key}.torrent");
+    let dest = torrents_dir.join(&filename);
+    if std::fs::write(&dest, bytes).is_ok() {
+        Some(filename)
+    } else {
+        None
+    }
+}
+
+fn reset_server_sync_state(shared: &Arc<TorrServerShared>) {
+    if let Ok(mut seen) = shared.server_seen_hashes.lock() {
+        seen.clear();
+    }
+    shared.needs_server_restore.store(true, Ordering::SeqCst);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_saved_torrent(
+    shared: &Arc<TorrServerShared>,
+    hash: &str,
+    title: &str,
+    magnet: Option<&str>,
+    torrent_file: Option<&str>,
+    poster: &str,
+    data: &str,
+    added_ts: i64,
+) {
+    let key = hash.trim().to_lowercase();
+    if key.is_empty() {
+        return;
+    }
+    let now = Utc::now().timestamp();
+    let best_magnet = magnet
+        .map(str::trim)
+        .filter(|m| m.starts_with("magnet:"))
+        .map(|m| m.to_string())
+        .unwrap_or_else(|| resolve_best_magnet(shared, hash));
+
+    if let Ok(mut saved) = shared.saved_torrents.lock() {
+        let entry = saved.entry(key.clone()).or_insert_with(|| SavedTorrentTask {
+            hash: key.clone(),
+            ..Default::default()
+        });
+        entry.hash = key.clone();
+        if !title.trim().is_empty() && (entry.title.trim().is_empty() || title.trim() != key) {
+            entry.title = title.trim().to_string();
+        }
+        if best_magnet.starts_with("magnet:")
+            && (entry.magnet.is_empty() || best_magnet.len() > entry.magnet.len())
+        {
+            entry.magnet = best_magnet;
+        }
+        if let Some(tf) = torrent_file.map(str::trim).filter(|s| !s.is_empty()) {
+            entry.torrent_file = tf.to_string();
+        }
+        if !poster.trim().is_empty() {
+            entry.poster = poster.trim().to_string();
+        }
+        if !data.trim().is_empty() {
+            entry.data = data.trim().to_string();
+        }
+        if entry.added_ts <= 900_000_000 {
+            entry.added_ts = if added_ts > 900_000_000 { added_ts } else { now };
+        }
+        save_torrents_saved(&shared.paths.ts_torrents_saved_path, &saved);
+    }
+
+    if let Ok(mut seen) = shared.server_seen_hashes.lock() {
+        seen.insert(key);
+    }
+}
+
+fn remove_saved_torrent(shared: &Arc<TorrServerShared>, hash: &str) {
+    let key = hash.trim().to_lowercase();
+    if key.is_empty() {
+        return;
+    }
+    let mut file_to_delete: Option<String> = None;
+    if let Ok(mut saved) = shared.saved_torrents.lock() {
+        if let Some(removed) = saved.remove(&key) {
+            if !removed.torrent_file.trim().is_empty() {
+                file_to_delete = Some(removed.torrent_file);
+            }
+            save_torrents_saved(&shared.paths.ts_torrents_saved_path, &saved);
+        }
+    }
+    if let Ok(mut seen) = shared.server_seen_hashes.lock() {
+        seen.remove(&key);
+    }
+    if let Some(fname) = file_to_delete {
+        let p = shared.paths.ts_torrents_dir.join(fname);
+        if p.exists() {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+fn reconcile_torrents_with_server(
+    shared: &Arc<TorrServerShared>,
+    api: &TorrServerApi,
+    list: &mut Vec<ApiTorrent>,
+) {
+
+    if shared.needs_server_restore.load(Ordering::SeqCst) {
+        let server_hashes: HashSet<String> = list
+            .iter()
+            .map(|t| t.hash.trim().to_lowercase())
+            .filter(|h| !h.is_empty())
+            .collect();
+
+        let mut missing: Vec<SavedTorrentTask> = shared
+            .saved_torrents
+            .lock()
+            .map(|saved| {
+                saved
+                    .values()
+                    .filter(|task| {
+                        let k = task.hash.trim().to_lowercase();
+                        !k.is_empty() && !server_hashes.contains(&k)
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        missing.sort_by_key(|t| t.added_ts);
+
+        let mut restored_ok = 0usize;
+        for task in missing {
+            let file_res = if !task.torrent_file.trim().is_empty() {
+                let p = shared.paths.ts_torrents_dir.join(task.torrent_file.trim());
+                if p.exists() {
+                    if let Ok(bytes) = std::fs::read(&p) {
+                        Some(api.upload_torrent_bytes(bytes, task.torrent_file.clone()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let res = match file_res {
+                Some(Ok(t)) => Ok(t),
+                _ => {
+                    let magnet = if !task.magnet.trim().is_empty() {
+                        task.magnet.clone()
+                    } else {
+                        resolve_best_magnet(shared, &task.hash)
+                    };
+                    api.add_backup_item(&TorrentBackupItem {
+                        hash: task.hash.clone(),
+                        title: task.title.clone(),
+                        poster: task.poster.clone(),
+                        data: task.data.clone(),
+                        magnet,
+                    })
+                }
+            };
+
+            match res {
+                Ok(_) => restored_ok += 1,
+                Err(e) => diagnostics::warn(
+                    "[TS:SYNC]",
+                    format!("Не удалось восстановить раздачу '{}': {e}", task.title),
+                ),
+            }
+        }
+
+        if restored_ok > 0 {
+            diagnostics::info(
+                "[TS:SYNC]",
+                format!("Автоматически восстановлено раздач в TorrServer: {restored_ok}"),
+            );
+            if let Ok(updated) = api.list_torrents() {
+                *list = updated;
+            }
+        }
+
+        shared.needs_server_restore.store(false, Ordering::SeqCst);
+        let new_seen: HashSet<String> = list
+            .iter()
+            .map(|t| t.hash.trim().to_lowercase())
+            .filter(|h| !h.is_empty())
+            .collect();
+        if let Ok(mut seen) = shared.server_seen_hashes.lock() {
+            *seen = new_seen;
+        }
+    }
+
+    // Snapshot saved metadata/links safely without holding multiple locks simultaneously
+    let links_snapshot = shared
+        .torrents_links
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_default();
+    let meta_snapshot = shared
+        .torrents_meta
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_default();
+    let prev_seen = shared
+        .server_seen_hashes
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+
+    let server_hashes: HashSet<String> = list
+        .iter()
+        .map(|t| t.hash.trim().to_lowercase())
+        .filter(|h| !h.is_empty())
+        .collect();
+
+    let now = Utc::now().timestamp();
+    let mut files_to_delete: Vec<String> = Vec::new();
+
+    if let Ok(mut saved) = shared.saved_torrents.lock() {
+        let mut changed = false;
+
+        // Upsert active torrents from server into local persistent list
+        for t in list.iter() {
+            let key = t.hash.trim().to_lowercase();
+            if key.is_empty() {
+                continue;
+            }
+            let disp = t.display_title();
+            let ts_cand = if t.timestamp > 900_000_000 {
+                t.timestamp
+            } else {
+                meta_snapshot.get(&key).copied().unwrap_or(now)
+            };
+            let magnet_cand = links_snapshot
+                .get(&key)
+                .map(|o| o.magnet.trim().to_string())
+                .filter(|m| m.starts_with("magnet:"))
+                .unwrap_or_else(|| format!("magnet:?xt=urn:btih:{key}"));
+
+            let is_new = !saved.contains_key(&key);
+            let entry = saved.entry(key.clone()).or_insert_with(|| SavedTorrentTask {
+                hash: key.clone(),
+                ..Default::default()
+            });
+            if is_new {
+                changed = true;
+            }
+            if !disp.trim().is_empty() && (entry.title.trim().is_empty() || (disp != key && entry.title == key)) {
+                entry.title = disp;
+                changed = true;
+            }
+            if magnet_cand.starts_with("magnet:")
+                && (entry.magnet.is_empty() || magnet_cand.len() > entry.magnet.len())
+            {
+                entry.magnet = magnet_cand;
+                changed = true;
+            }
+            if !t.poster.trim().is_empty() && entry.poster != t.poster.trim() {
+                entry.poster = t.poster.trim().to_string();
+                changed = true;
+            }
+            if !t.data.trim().is_empty() && entry.data != t.data.trim() {
+                entry.data = t.data.trim().to_string();
+                changed = true;
+            }
+            if entry.added_ts <= 900_000_000 && ts_cand > 900_000_000 {
+                entry.added_ts = ts_cand;
+                changed = true;
+            }
+        }
+
+        // If a hash was confirmed on the server earlier in this active session and disappeared now
+        // (e.g. deleted from TorrServer Web UI), remove it from saved_torrents as well.
+        for gone_hash in prev_seen.difference(&server_hashes) {
+            if let Some(removed) = saved.remove(gone_hash) {
+                changed = true;
+                if !removed.torrent_file.trim().is_empty() {
+                    files_to_delete.push(removed.torrent_file);
+                }
+            }
+        }
+
+        if changed {
+            save_torrents_saved(&shared.paths.ts_torrents_saved_path, &saved);
+        }
+    }
+
+    if let Ok(mut seen) = shared.server_seen_hashes.lock() {
+        *seen = server_hashes;
+    }
+
+    for fname in files_to_delete {
+        let p = shared.paths.ts_torrents_dir.join(fname);
+        if p.exists() {
+            let _ = std::fs::remove_file(p);
         }
     }
 }
