@@ -60,7 +60,7 @@ mod win_impl {
             var userEl = document.querySelector('#logged-in-username');
             var user = userEl ? (userEl.textContent || '').trim() : '';
             var href = String(location.href || '');
-            var html = (!hasCf && (hasResults || href.indexOf('tracker.php') !== -1))
+            var html = (!hasCf && (hasResults || href.indexOf('tracker.php') !== -1 || href.indexOf('viewtopic.php') !== -1))
                 ? (document.documentElement ? document.documentElement.outerHTML : '')
                 : '';
             window.ipc.postMessage(JSON.stringify({
@@ -402,7 +402,7 @@ mod win_impl {
                             let _ = self.show_window_at(&format!("{base}/forum/login.php"), &init_cfg);
                             return Err("Требуется вход в RuTracker: войдите в открывшемся окне браузера и повторите поиск.".to_string());
                         }
-                        let results = parse_tracker_html(&html);
+                        let results = parse_tracker_html(&html, &base);
                         diagnostics::info(
                             "[TS:RUTRACKER]",
                             format!(
@@ -453,7 +453,7 @@ mod win_impl {
                 return Err("Требуется вход в RuTracker: войдите в открывшемся окне браузера и повторите поиск.".to_string());
             }
 
-            let results = parse_tracker_html(&html);
+            let results = parse_tracker_html(&html, &base);
             diagnostics::info(
                 "[TS:RUTRACKER]",
                 format!(
@@ -462,6 +462,43 @@ mod win_impl {
                 ),
             );
             Ok(results)
+        }
+
+        pub fn fetch_topic_html(
+            &self,
+            cfg: &TorrServerConfig,
+            topic_id: &str,
+        ) -> Result<String, String> {
+            let base = cfg.effective_rutracker_mirror();
+            let init_cfg = make_init_cfg(cfg);
+            let cur_url = self.current_url().unwrap_or_default();
+            if cur_url.starts_with(&base) {
+                let req_id = self.next_id()?;
+                let tid_json = serde_json::to_string(topic_id)
+                    .map_err(|e| format!("Ошибка сериализации topic_id: {e}"))?;
+                let js = format!(
+                    r#"(async function(){{
+                        try {{
+                            var r = await fetch('/forum/viewtopic.php?t=' + {tid_json}, {{ credentials: 'include' }});
+                            var buf = await r.arrayBuffer();
+                            var html = new TextDecoder('windows-1251').decode(buf);
+                            window.ipc.postMessage(JSON.stringify({{ kind: 'fetch_html', id: {req_id}, ok: r.ok, status: r.status, html: html }}));
+                        }} catch (e) {{
+                            window.ipc.postMessage(JSON.stringify({{ kind: 'fetch_err', id: {req_id}, error: String(e) }}));
+                        }}
+                    }})();"#
+                );
+                if let Ok(WvFetchOutcome::Html { ok, html, .. }) =
+                    self.run_fetch(&init_cfg, &base, js, req_id, 15)
+                {
+                    if ok && !looks_like_cloudflare_html(&html) {
+                        return Ok(html);
+                    }
+                }
+            }
+            let topic_url = format!("{base}/forum/viewtopic.php?t={topic_id}");
+            let page = self.navigate_and_wait(&topic_url, &init_cfg, 16_000)?;
+            Ok(page.html)
         }
 
         pub fn fetch_torrent_or_magnet(
@@ -706,7 +743,7 @@ mod win_impl {
         let join_handle = thread::Builder::new()
             .name("ts-rutracker-wv2".to_string())
             .spawn(move || unsafe {
-                let _ = CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED);
+                let _ = CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED as u32);
 
                 if let Err(e) = fs::create_dir_all(&webview_dir) {
                     let _ = ready_tx.send(Err(format!(
@@ -887,7 +924,7 @@ mod win_impl {
             std::mem::replace(&mut st.web_context, WebContext::new(None))
         });
 
-        let mut builder = WebViewBuilder::new_with_web_context(&mut temp_ctx)
+        let mut builder = WebViewBuilder::with_web_context(&mut temp_ctx)
             .with_url(initial_url)
             .with_ipc_handler(move |req| {
                 handle_ipc_message(req.body(), &pf_ipc);
@@ -1379,6 +1416,14 @@ mod non_win_impl {
             _rel_path: &str,
             _log_label: &str,
         ) -> Result<Vec<ApiSearchResult>, String> {
+            Err("Встроенный браузер WebView2 поддерживается только на Windows".to_string())
+        }
+
+        pub fn fetch_topic_html(
+            &self,
+            _cfg: &TorrServerConfig,
+            _topic_id: &str,
+        ) -> Result<String, String> {
             Err("Встроенный браузер WebView2 поддерживается только на Windows".to_string())
         }
 

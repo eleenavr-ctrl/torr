@@ -132,12 +132,27 @@ impl RuTrackerClient {
             );
         }
 
-        let results = parse_tracker_html(&html);
+        let results = parse_tracker_html(&html, &base);
         diagnostics::info(
             "[TS:RUTRACKER]",
             format!("Поиск RuTracker {log_label} вернул {} результатов", results.len()),
         );
         Ok(results)
+    }
+
+    pub fn fetch_topic_html(&self, cfg: &TorrServerConfig, topic_id: &str) -> Result<String, String> {
+        if cfg.rutracker_use_webview {
+            return self.webview.fetch_topic_html(cfg, topic_id);
+        }
+        let base = cfg.effective_rutracker_mirror();
+        let topic_url = format!("{base}/forum/viewtopic.php?t={topic_id}");
+        let client = self.ensure_client(cfg, false)?;
+        let mut html = self.get_text_cp1251(&client, cfg, &topic_url)?;
+        if looks_like_login_page(&html) && cfg.rutracker_cookie.trim().is_empty() {
+            let fresh = self.ensure_client(cfg, true)?;
+            html = self.get_text_cp1251(&fresh, cfg, &topic_url)?;
+        }
+        Ok(html)
     }
 
     pub fn fetch_torrent_or_magnet(
@@ -436,8 +451,9 @@ pub(crate) fn looks_like_login_page(html: &str) -> bool {
         || (low.contains("login.php") && low.contains("login_password"))
 }
 
-pub(crate) fn parse_tracker_html(html: &str) -> Vec<ApiSearchResult> {
+pub(crate) fn parse_tracker_html(html: &str, base_url: &str) -> Vec<ApiSearchResult> {
     let mut results = Vec::new();
+    let base_trimmed = base_url.trim_end_matches('/');
 
     // Narrow down to tor-tbl if present
     let scope = if let Some(idx) = html.find("id=\"tor-tbl\"") {
@@ -481,6 +497,7 @@ pub(crate) fn parse_tracker_html(html: &str) -> Vec<ApiSearchResult> {
 
         let (date_ts, date_text) = extract_topic_date(row_html);
         let quality = detect_quality(&title);
+        let page_url = format!("{base_trimmed}/forum/viewtopic.php?t={tid}");
         results.push(ApiSearchResult {
             title,
             magnet: format!("rutracker://topic/{tid}"),
@@ -492,6 +509,7 @@ pub(crate) fn parse_tracker_html(html: &str) -> Vec<ApiSearchResult> {
             tracker: "RuTracker".to_string(),
             date_ts,
             date_text,
+            page_url,
         });
 
         if results.len() >= 80 {

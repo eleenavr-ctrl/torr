@@ -141,6 +141,7 @@ pub struct ApiSearchResult {
     pub tracker: String,
     pub date_ts: i64,
     pub date_text: String,
+    pub page_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -335,6 +336,94 @@ impl TorrServerApi {
             return Err(format!("HTTP {} при удалении раздачи", resp.status().as_u16()));
         }
         Ok(())
+    }
+
+    pub fn refresh_torrent(&self, hash: &str) -> Result<ApiTorrent, String> {
+        let _ = self.drop_torrent(hash);
+        std::thread::sleep(Duration::from_millis(160));
+        self.get_torrent(hash)
+    }
+
+    pub fn get_playlist_m3u(&self, hash: &str) -> Result<String, String> {
+        let url = format!("{}/playlist?hash={}", self.base_url, urlencoding::encode(hash));
+        if let Ok(resp) = self.auth(self.client.get(&url)).send() {
+            if resp.status().is_success() {
+                if let Ok(txt) = resp.text() {
+                    if txt.contains("#EXTM3U") || txt.contains("/stream") || txt.contains("http") {
+                        return Ok(txt);
+                    }
+                }
+            }
+        }
+        // Fallback: generate M3U locally from torrent files
+        let t = self.get_torrent(hash)?;
+        let mut files = t.files();
+        let videos: Vec<_> = files
+            .iter()
+            .filter(|f| crate::modules::torrserver::player::is_video_filename(&f.path))
+            .cloned()
+            .collect();
+        if !videos.is_empty() {
+            files = videos;
+        }
+        if files.is_empty() {
+            return Err("У раздачи пока нет файлов для плейлиста".to_string());
+        }
+        let mut out = String::from("#EXTM3U\n");
+        for f in files {
+            let name = std::path::Path::new(&f.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&f.path);
+            let stream = self.stream_url(hash, f.id, name);
+            out.push_str(&format!("#EXTINF:-1,{name}\n{stream}\n"));
+        }
+        Ok(out)
+    }
+
+    pub fn get_all_playlist_m3u(&self) -> Result<String, String> {
+        let url = format!("{}/playlistall/all.m3u", self.base_url);
+        if let Ok(resp) = self.auth(self.client.get(&url)).send() {
+            if resp.status().is_success() {
+                if let Ok(txt) = resp.text() {
+                    if txt.contains("#EXTM3U") || txt.contains("/stream") {
+                        return Ok(txt);
+                    }
+                }
+            }
+        }
+        let list = self.list_torrents()?;
+        if list.is_empty() {
+            return Err("Список раздач на сервере пуст".to_string());
+        }
+        let mut out = String::from("#EXTM3U\n");
+        let mut count = 0usize;
+        for t in &list {
+            let full_t = self.get_torrent(&t.hash).unwrap_or_else(|_| t.clone());
+            let mut files = full_t.files();
+            let videos: Vec<_> = files
+                .iter()
+                .filter(|f| crate::modules::torrserver::player::is_video_filename(&f.path))
+                .cloned()
+                .collect();
+            if !videos.is_empty() {
+                files = videos;
+            }
+            let title_prefix = full_t.display_title();
+            for f in files {
+                let name = std::path::Path::new(&f.path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&f.path);
+                let stream = self.stream_url(&full_t.hash, f.id, name);
+                out.push_str(&format!("#EXTINF:-1,{title_prefix} — {name}\n{stream}\n"));
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Err("На сервере нет файлов для экспорта в плейлист".to_string());
+        }
+        Ok(out)
     }
 
     pub fn upload_torrent_file(&self, path: &Path) -> Result<ApiTorrent, String> {
@@ -658,7 +747,8 @@ impl TorrServerApi {
             match short_client.get(url).send() {
                 Ok(resp) if resp.status().is_success() => {
                     let html = resp.text().unwrap_or_default();
-                    let parsed = parse_rutor_top_html(&html);
+                    let base_origin = url.trim_end_matches("/top");
+                    let parsed = parse_rutor_top_html(&html, base_origin);
                     if !parsed.is_empty() {
                         diagnostics::info(
                             "[TS:API]",
@@ -919,6 +1009,14 @@ fn parse_rutor_value(v: &Value) -> Option<ApiSearchResult> {
         title
     };
     let quality = detect_quality(&disp_title);
+    let page_url = {
+        let raw = first_non_empty_str(v, &["Url", "url", "Link", "link", "Guid", "guid", "Comments", "comments"]);
+        if raw.starts_with("http://") || raw.starts_with("https://") {
+            raw
+        } else {
+            String::new()
+        }
+    };
 
     Some(ApiSearchResult {
         title: disp_title,
@@ -931,6 +1029,7 @@ fn parse_rutor_value(v: &Value) -> Option<ApiSearchResult> {
         tracker,
         date_ts,
         date_text,
+        page_url,
     })
 }
 
@@ -965,6 +1064,14 @@ fn parse_jacred_value(v: &Value) -> Option<ApiSearchResult> {
         title
     };
     let quality = detect_quality(&disp_title);
+    let page_url = {
+        let raw = first_non_empty_str(v, &["url", "Url", "link", "Link", "topic"]);
+        if raw.starts_with("http://") || raw.starts_with("https://") {
+            raw
+        } else {
+            String::new()
+        }
+    };
 
     Some(ApiSearchResult {
         title: disp_title,
@@ -977,10 +1084,11 @@ fn parse_jacred_value(v: &Value) -> Option<ApiSearchResult> {
         tracker,
         date_ts,
         date_text,
+        page_url,
     })
 }
 
-fn parse_rutor_top_html(html: &str) -> Vec<ApiSearchResult> {
+fn parse_rutor_top_html(html: &str, base_origin: &str) -> Vec<ApiSearchResult> {
     let mut results = Vec::new();
     let now_ts = Utc::now().timestamp();
 
@@ -1004,8 +1112,9 @@ fn parse_rutor_top_html(html: &str) -> Vec<ApiSearchResult> {
             continue;
         }
 
-        // Extract title from `<a href="/torrent/...`
+        // Extract title and page_url from `<a href="/torrent/...`
         let mut title = String::new();
+        let mut page_url = String::new();
         let mut scan = 0;
         while let Some(a_rel) = row_html[scan..].find("<a ") {
             let a_start = scan + a_rel;
@@ -1020,6 +1129,17 @@ fn parse_rutor_top_html(html: &str) -> Vec<ApiSearchResult> {
             let inner = &row_html[tag_end + 1..tag_end + 1 + close_rel];
             scan = tag_end + 1 + close_rel + 4;
             if attrs.contains("/torrent/") {
+                if let Some(href_pos) = attrs.find("href=\"") {
+                    let tail = &attrs[href_pos + 6..];
+                    if let Some(end_q) = tail.find('"') {
+                        let href = &tail[..end_q];
+                        if href.starts_with("http") {
+                            page_url = href.to_string();
+                        } else if href.starts_with('/') {
+                            page_url = format!("{base_origin}{href}");
+                        }
+                    }
+                }
                 let cleaned = strip_html_tags(inner);
                 if !cleaned.is_empty() {
                     title = cleaned;
@@ -1103,6 +1223,7 @@ fn parse_rutor_top_html(html: &str) -> Vec<ApiSearchResult> {
             tracker: "RuTor (Топ)".to_string(),
             date_ts,
             date_text,
+            page_url,
         });
 
         if results.len() >= 80 {
@@ -1213,4 +1334,32 @@ pub fn parse_backup_json(raw: &str) -> Result<Vec<TorrentBackupItem>, String> {
         return Err("В JSON-файле не найдено ни одной раздачи (hash/magnet)".to_string());
     }
     Ok(out)
+}
+
+pub fn extract_torrent_comment_url(bytes: &[u8]) -> Option<String> {
+    for marker in [b"13:comment.utf-8".as_slice(), b"7:comment".as_slice()] {
+        if let Some(pos) = bytes.windows(marker.len()).position(|w| w == marker) {
+            let after = &bytes[pos + marker.len()..];
+            if let Some(colon) = after.iter().position(|&b| b == b':') {
+                if let Ok(len_str) = std::str::from_utf8(&after[..colon]) {
+                    if let Ok(len) = len_str.parse::<usize>() {
+                        let start = colon + 1;
+                        if start + len <= after.len() && len <= 1024 {
+                            let val = String::from_utf8_lossy(&after[start..start + len]);
+                            if let Some(http_pos) = val.find("http://").or_else(|| val.find("https://")) {
+                                let url: String = val[http_pos..]
+                                    .chars()
+                                    .take_while(|c| !c.is_whitespace() && *c != '"' && *c != '<' && *c != '>')
+                                    .collect();
+                                if url.len() > 10 {
+                                    return Some(url);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }

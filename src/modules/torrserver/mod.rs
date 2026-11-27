@@ -1,5 +1,6 @@
 pub mod api;
 pub mod clipboard;
+pub mod metadata;
 pub mod player;
 pub mod rutracker;
 pub mod rutracker_webview;
@@ -7,12 +8,15 @@ pub mod server_manager;
 
 use crate::core;
 use crate::core::diagnostics;
-use crate::core::storage::{save_config, AppConfig, PortablePaths, TorrServerConfig};
+use crate::core::storage::{save_config, AppConfig, PortablePaths, TorrServerConfig, TorrentOriginMeta};
 use crate::modules::torrserver::api::{
-    format_bytes, format_speed, format_unix_datetime_short, parse_backup_json, ApiSearchResult,
-    ApiTorrent, TorrServerApi, TorrServerEngineSettings,
+    extract_torrent_comment_url, format_bytes, format_speed, format_unix_datetime_short,
+    parse_backup_json, ApiSearchResult, ApiTorrent, TorrServerApi, TorrServerEngineSettings,
 };
 use crate::modules::torrserver::clipboard::ClipboardWatcher;
+use crate::modules::torrserver::metadata::{
+    fetch_rich_metadata, DecodedRgbaImage, TorrentRichMetadata,
+};
 use crate::modules::torrserver::player::{
     detect_installed_players, is_video_filename, launch_player, load_history, resolve_player_exe,
     save_history, upsert_history_watch, write_m3u_playlist, DetectedPlayer, HistoryRecord,
@@ -22,13 +26,13 @@ use crate::modules::torrserver::server_manager::{
     default_matrix_releases, fetch_available_matrix_releases, MatrixReleaseOption, ServerManager,
 };
 use crate::modules::{AppModule, ModuleInfo, ModuleStatus};
-use crate::{AppWindow, HistoryItem, SearchResultItem, TorrentFileItem, TorrentItem};
+use crate::{AppWindow, HistoryItem, ScreenshotItem, SearchResultItem, TorrentFileItem, TorrentItem};
 use chrono::Utc;
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -43,6 +47,9 @@ struct TorrServerShared {
     engine_updating: Arc<AtomicBool>,
     cached_torrents: Mutex<Vec<ApiTorrent>>,
     torrents_meta: Mutex<HashMap<String, i64>>,
+    torrents_links: Mutex<HashMap<String, TorrentOriginMeta>>,
+    detail_meta_cache: Mutex<HashMap<String, TorrentRichMetadata>>,
+    detail_generation: Arc<AtomicU64>,
     selected_hash: Mutex<String>,
     search_raw: Mutex<Vec<ApiSearchResult>>,
     search_quality: Mutex<String>,
@@ -104,6 +111,7 @@ impl TorrServerModule {
     pub fn new(paths: PortablePaths, config: Arc<Mutex<AppConfig>>) -> Self {
         let history = load_history(&paths.ts_history_path);
         let torrents_meta = load_torrents_meta(&paths.ts_torrents_meta_path);
+        let torrents_links = load_torrents_links(&paths.ts_torrents_links_path);
         let players = detect_installed_players();
         let server = ServerManager::new(paths.clone());
         let rutracker = RuTrackerClient::new(paths.ts_webview_dir.clone());
@@ -118,6 +126,9 @@ impl TorrServerModule {
             engine_updating: Arc::new(AtomicBool::new(false)),
             cached_torrents: Mutex::new(Vec::new()),
             torrents_meta: Mutex::new(torrents_meta),
+            torrents_links: Mutex::new(torrents_links),
+            detail_meta_cache: Mutex::new(HashMap::new()),
+            detail_generation: Arc::new(AtomicU64::new(0)),
             selected_hash: Mutex::new(String::new()),
             search_raw: Mutex::new(Vec::new()),
             search_quality: Mutex::new("ALL".to_string()),
@@ -173,6 +184,7 @@ impl AppModule for TorrServerModule {
                     Ok(t) => {
                         let title = t.display_title();
                         record_torrent_timestamp(&shared_add, &t.hash, t.timestamp);
+                        record_torrent_origin(&shared_add, &t.hash, Some(&magnet), None, None, None);
                         shared_add.toast(format!("Добавлено из буфера: {title}"));
                         refresh_torrents_and_status(&shared_add);
                     }
@@ -238,6 +250,7 @@ impl AppModule for TorrServerModule {
         ui.set_ts_password(cfg.password.clone().into());
         ui.set_engine_watchdog(cfg.engine_watchdog);
         ui.set_keep_engine_on_exit(cfg.keep_engine_on_exit);
+        ui.set_kp_api_key(cfg.kinopoisk_api_key.clone().into());
         ui.set_torrents_sort_mode(cfg.torrents_sort_mode);
         ui.set_only_video_files(cfg.only_video_files);
         ui.set_engine_missing(!self.shared.server.binary_exists());
@@ -292,7 +305,7 @@ impl AppModule for TorrServerModule {
                 }
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
-                    add_and_optionally_play(&s, &link, None, false);
+                    add_and_optionally_play(&s, &link, None, None, false);
                 });
             });
         }
@@ -311,7 +324,7 @@ impl AppModule for TorrServerModule {
                             }
                             let s = Arc::clone(&shared);
                             thread::spawn(move || {
-                                add_and_optionally_play(&s, &trimmed, None, false);
+                                add_and_optionally_play(&s, &trimmed, None, None, false);
                             });
                             return;
                         }
@@ -341,10 +354,18 @@ impl AppModule for TorrServerModule {
         {
             let shared = Arc::clone(&self.shared);
             ui.on_select_torrent(move |hash| {
-                if let Ok(mut sel) = shared.selected_hash.lock() {
-                    *sel = hash.to_string();
-                }
+                let h = hash.to_string();
+                let changed = if let Ok(mut sel) = shared.selected_hash.lock() {
+                    let diff = *sel != h;
+                    *sel = h.clone();
+                    diff
+                } else {
+                    true
+                };
                 push_torrents_to_ui(&shared);
+                if changed || !h.is_empty() {
+                    load_torrent_details_async(&shared, &h, false);
+                }
             });
         }
 
@@ -396,6 +417,7 @@ impl AppModule for TorrServerModule {
                             if let Ok(mut sel) = s.selected_hash.lock() {
                                 if *sel == h {
                                     sel.clear();
+                                    clear_detail_ui(&s);
                                 }
                             }
                             s.toast("Раздача удалена");
@@ -410,15 +432,219 @@ impl AppModule for TorrServerModule {
             });
         }
 
-        // 8. Copy magnet
+        // 8. Copy magnet (prefers saved original magnet link with trackers)
         {
             let shared = Arc::clone(&self.shared);
             ui.on_copy_torrent_magnet(move |hash| {
                 let h = hash.to_string();
-                let magnet = format!("magnet:?xt=urn:btih:{h}");
+                let magnet = resolve_best_magnet(&shared, &h);
                 if let Ok(mut cb) = arboard::Clipboard::new() {
                     let _ = cb.set_text(magnet);
                     shared.toast("Magnet-ссылка скопирована");
+                }
+            });
+        }
+
+        // 8a. Download playlist (.m3u) of a single torrent
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_download_torrent_playlist(move |hash| {
+                let h = hash.to_string();
+                let s = Arc::clone(&shared);
+                thread::spawn(move || {
+                    let api = TorrServerApi::from_config(&s.ts_config());
+                    let title = s
+                        .cached_torrents
+                        .lock()
+                        .ok()
+                        .and_then(|list| list.iter().find(|t| t.hash == h).map(|t| t.display_title()))
+                        .unwrap_or_else(|| h.clone());
+                    let safe_name = sanitize_filename(&title);
+                    match api.get_playlist_m3u(&h) {
+                        Ok(m3u) => {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_file_name(&format!("{safe_name}.m3u"))
+                                .add_filter("Плейлист M3U", &["m3u"])
+                                .save_file()
+                            {
+                                match std::fs::write(&path, m3u) {
+                                    Ok(_) => s.toast(format!("Плейлист сохранён: {}", path.display())),
+                                    Err(e) => s.toast(format!("Ошибка сохранения плейлиста: {e}")),
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            diagnostics::warn("[TS:API]", e.clone());
+                            s.toast(e);
+                        }
+                    }
+                });
+            });
+        }
+
+        // 8b. Download playlist (.m3u) of ALL torrents on server
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_download_all_playlist(move || {
+                let s = Arc::clone(&shared);
+                thread::spawn(move || {
+                    let api = TorrServerApi::from_config(&s.ts_config());
+                    match api.get_all_playlist_m3u() {
+                        Ok(m3u) => {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_file_name("TorrServer_All.m3u")
+                                .add_filter("Плейлист M3U", &["m3u"])
+                                .save_file()
+                            {
+                                match std::fs::write(&path, m3u) {
+                                    Ok(_) => s.toast(format!("Общий плейлист сохранён: {}", path.display())),
+                                    Err(e) => s.toast(format!("Ошибка сохранения плейлиста: {e}")),
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            diagnostics::warn("[TS:API]", e.clone());
+                            s.toast(e);
+                        }
+                    }
+                });
+            });
+        }
+
+        // 8c. Refresh single torrent (drop + get + re-fetch rich metadata)
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_refresh_single_torrent(move |hash| {
+                let h = hash.to_string();
+                let s = Arc::clone(&shared);
+                thread::spawn(move || {
+                    let api = TorrServerApi::from_config(&s.ts_config());
+                    match api.refresh_torrent(&h) {
+                        Ok(_) => {
+                            s.toast("Торрент обновлён");
+                            refresh_torrents_and_status(&s);
+                            let is_sel = s
+                                .selected_hash
+                                .lock()
+                                .map(|sel| *sel == h)
+                                .unwrap_or(false);
+                            if is_sel {
+                                load_torrent_details_async(&s, &h, true);
+                            }
+                        }
+                        Err(e) => {
+                            diagnostics::warn("[TS:API]", e.clone());
+                            s.toast(e);
+                        }
+                    }
+                });
+            });
+        }
+
+        // 8d. Show torrent info modal
+        {
+            let shared = Arc::clone(&self.shared);
+            let weak = ui.as_weak();
+            ui.on_show_torrent_info(move |hash| {
+                let h = hash.to_string();
+                let cfg = shared.ts_config();
+                let torrent_opt = shared
+                    .cached_torrents
+                    .lock()
+                    .ok()
+                    .and_then(|list| list.into_iter().find(|t| t.hash == h));
+                let added_ts = shared
+                    .torrents_meta
+                    .lock()
+                    .ok()
+                    .and_then(|m| m.get(&h.trim().to_lowercase()).copied())
+                    .unwrap_or(0);
+                let tracker_url = resolve_tracker_url(&shared, &cfg, &h).unwrap_or_default();
+                let magnet = resolve_best_magnet(&shared, &h);
+                let ratings = shared
+                    .detail_meta_cache
+                    .lock()
+                    .ok()
+                    .and_then(|m| m.get(&h.trim().to_lowercase()).cloned())
+                    .map(|meta| {
+                        let mut parts = Vec::new();
+                        if !meta.rating_kp.is_empty() {
+                            parts.push(format!("Кинопоиск: {}", meta.rating_kp));
+                        }
+                        if !meta.rating_imdb.is_empty() {
+                            parts.push(format!("IMDb: {}", meta.rating_imdb));
+                        }
+                        parts.join("   •   ")
+                    })
+                    .unwrap_or_default();
+
+                if let Some(app) = weak.upgrade() {
+                    if let Some(t) = torrent_opt {
+                        let ts = if t.timestamp > 900_000_000 { t.timestamp } else { added_ts };
+                        app.set_info_hash(t.hash.clone().into());
+                        app.set_info_title(t.display_title().into());
+                        app.set_info_size(format_bytes(t.torrent_size).into());
+                        app.set_info_added(format_unix_datetime_short(ts).into());
+                        app.set_info_status(
+                            if t.stat_string.is_empty() {
+                                "Активен".to_string()
+                            } else {
+                                t.stat_string.clone()
+                            }
+                            .into(),
+                        );
+                        app.set_info_speed(format_speed(t.download_speed).into());
+                        app.set_info_peers(format!("{} / {}", t.active_peers, t.connected_seeders).into());
+                        app.set_info_files_count(t.files().len().to_string().into());
+                    } else {
+                        app.set_info_hash(h.clone().into());
+                        app.set_info_title(h.clone().into());
+                        app.set_info_size("—".into());
+                        app.set_info_added("".into());
+                        app.set_info_status("—".into());
+                        app.set_info_speed("0 КБ/с".into());
+                        app.set_info_peers("0 / 0".into());
+                        app.set_info_files_count("0".into());
+                    }
+                    app.set_info_tracker_url(tracker_url.into());
+                    app.set_info_ratings(ratings.into());
+                    app.set_info_magnet(magnet.into());
+                    app.set_torrent_info_visible(true);
+                }
+            });
+        }
+
+        // 8e. Open tracker page in browser
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_open_tracker_page(move |hash| {
+                let h = hash.to_string();
+                let cfg = shared.ts_config();
+                if let Some(url) = resolve_tracker_url(&shared, &cfg, &h) {
+                    core::open_url_in_browser(&url);
+                } else {
+                    shared.toast("Страница на трекере не найдена (раздача добавлена без ссылки на тему)");
+                }
+            });
+        }
+
+        // 8f. Refresh rich movie metadata manually
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_refresh_torrent_metadata(move |hash| {
+                let h = hash.to_string();
+                if !h.is_empty() {
+                    load_torrent_details_async(&shared, &h, true);
+                }
+            });
+        }
+
+        // 8g. Open arbitrary external URL (from screenshot lightbox)
+        {
+            ui.on_open_external_url(move |url| {
+                let u = url.trim();
+                if u.starts_with("http://") || u.starts_with("https://") {
+                    core::open_url_in_browser(u);
                 }
             });
         }
@@ -705,23 +931,27 @@ impl AppModule for TorrServerModule {
         // 15. Add / Play search result
         {
             let shared = Arc::clone(&self.shared);
-            ui.on_add_search_result(move |magnet, title| {
+            ui.on_add_search_result(move |magnet, title, page_url| {
                 let m = magnet.to_string();
                 let t = title.to_string();
+                let u = page_url.trim().to_string();
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
-                    add_and_optionally_play(&s, &m, Some(&t), false);
+                    let page_opt = if u.is_empty() { None } else { Some(u.as_str()) };
+                    add_and_optionally_play(&s, &m, Some(&t), page_opt, false);
                 });
             });
         }
         {
             let shared = Arc::clone(&self.shared);
-            ui.on_play_search_result(move |magnet, title| {
+            ui.on_play_search_result(move |magnet, title, page_url| {
                 let m = magnet.to_string();
                 let t = title.to_string();
+                let u = page_url.trim().to_string();
                 let s = Arc::clone(&shared);
                 thread::spawn(move || {
-                    add_and_optionally_play(&s, &m, Some(&t), true);
+                    let page_opt = if u.is_empty() { None } else { Some(u.as_str()) };
+                    add_and_optionally_play(&s, &m, Some(&t), page_opt, true);
                 });
             });
         }
@@ -751,10 +981,10 @@ impl AppModule for TorrServerModule {
                     if api.get_torrent(&h).is_ok() {
                         play_torrent_file(&s, &h, -1);
                     } else if !m.is_empty() {
-                        add_and_optionally_play(&s, &m, None, true);
+                        add_and_optionally_play(&s, &m, None, None, true);
                     } else {
                         let fallback_magnet = format!("magnet:?xt=urn:btih:{h}");
-                        add_and_optionally_play(&s, &fallback_magnet, None, true);
+                        add_and_optionally_play(&s, &fallback_magnet, None, None, true);
                     }
                 });
             });
@@ -809,6 +1039,7 @@ impl AppModule for TorrServerModule {
                     let password = app.get_ts_password().to_string();
                     let watchdog = app.get_engine_watchdog();
                     let keep_on_exit = app.get_keep_engine_on_exit();
+                    let kp_key = app.get_kp_api_key().trim().to_string();
 
                     app.set_is_remote_mode(mode == 1);
                     shared.update_ts_config(|c| {
@@ -819,6 +1050,7 @@ impl AppModule for TorrServerModule {
                         c.password = password;
                         c.engine_watchdog = watchdog;
                         c.keep_engine_on_exit = keep_on_exit;
+                        c.kinopoisk_api_key = kp_key;
                     });
                     let s = Arc::clone(&shared);
                     thread::spawn(move || {
@@ -831,6 +1063,10 @@ impl AppModule for TorrServerModule {
                         }
                         thread::sleep(Duration::from_millis(400));
                         refresh_torrents_and_status(&s);
+                        let sel_h = s.selected_hash.lock().map(|g| g.clone()).unwrap_or_default();
+                        if !sel_h.is_empty() {
+                            load_torrent_details_async(&s, &sel_h, !cfg.kinopoisk_api_key.is_empty());
+                        }
                         s.toast("Настройки подключения применены");
                     });
                 }
@@ -1437,18 +1673,32 @@ fn add_and_optionally_play(
     shared: &Arc<TorrServerShared>,
     link: &str,
     title: Option<&str>,
+    page_url: Option<&str>,
     auto_play: bool,
 ) {
     let cfg = shared.ts_config();
     let api = TorrServerApi::from_config(&cfg);
 
+    let mut extracted_comment_url: Option<String> = None;
+    let mut rt_topic_id: Option<String> = None;
+    let mut saved_magnet: Option<String> = if link.starts_with("magnet:") {
+        Some(link.to_string())
+    } else {
+        None
+    };
+
     let result = if let Some(topic_id) = link.strip_prefix("rutracker://topic/") {
+        rt_topic_id = Some(topic_id.to_string());
         shared.toast("Загрузка торрента с RuTracker...");
         match shared.rutracker.fetch_torrent_or_magnet(&cfg, topic_id) {
             Ok(RuTrackerPayload::TorrentBytes { bytes, filename }) => {
+                extracted_comment_url = extract_torrent_comment_url(&bytes);
                 api.upload_torrent_bytes(bytes, filename)
             }
-            Ok(RuTrackerPayload::Magnet(magnet)) => api.add_magnet(&magnet, title),
+            Ok(RuTrackerPayload::Magnet(magnet)) => {
+                saved_magnet = Some(magnet.clone());
+                api.add_magnet(&magnet, title)
+            }
             Err(e) => Err(e),
         }
     } else {
@@ -1460,12 +1710,29 @@ fn add_and_optionally_play(
             let hash = t.hash.clone();
             let disp = t.display_title();
             record_torrent_timestamp(shared, &hash, t.timestamp);
+            let final_tracker_url = page_url
+                .map(|s| s.to_string())
+                .or(extracted_comment_url)
+                .or_else(|| {
+                    rt_topic_id
+                        .as_ref()
+                        .map(|tid| format!("{}/forum/viewtopic.php?t={tid}", cfg.effective_rutracker_mirror()))
+                });
+            record_torrent_origin(
+                shared,
+                &hash,
+                saved_magnet.as_deref(),
+                final_tracker_url.as_deref(),
+                rt_topic_id.as_ref().map(|_| "RuTracker"),
+                rt_topic_id.as_deref(),
+            );
             diagnostics::info("[TS:API]", format!("Добавлена раздача: {disp} ({hash})"));
             if let Ok(mut sel) = shared.selected_hash.lock() {
                 *sel = hash.clone();
             }
             shared.toast(format!("Добавлено: {disp}"));
             refresh_torrents_and_status(shared);
+            load_torrent_details_async(shared, &hash, false);
             if auto_play {
                 // Brief wait so TorrServer retrieves file list metadata if needed
                 thread::sleep(Duration::from_millis(600));
@@ -1481,15 +1748,40 @@ fn add_and_optionally_play(
 
 fn upload_torrent_files(shared: &Arc<TorrServerShared>, paths: &[PathBuf]) {
     let api = TorrServerApi::from_config(&shared.ts_config());
+    let mut last_hash = String::new();
     for p in paths {
-        match api.upload_torrent_file(p) {
+        let bytes = match std::fs::read(p) {
+            Ok(b) => b,
+            Err(e) => {
+                let msg = format!("Не удалось прочитать .torrent файл: {e}");
+                diagnostics::error("[TS:API]", msg.clone());
+                shared.toast(msg);
+                continue;
+            }
+        };
+        let comment_url = extract_torrent_comment_url(&bytes);
+        let filename = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("upload.torrent")
+            .to_string();
+        match api.upload_torrent_bytes(bytes, filename) {
             Ok(t) => {
                 let disp = t.display_title();
                 record_torrent_timestamp(shared, &t.hash, t.timestamp);
+                record_torrent_origin(
+                    shared,
+                    &t.hash,
+                    None,
+                    comment_url.as_deref(),
+                    None,
+                    None,
+                );
                 diagnostics::info("[TS:API]", format!("Загружен .torrent: {disp}"));
                 if let Ok(mut sel) = shared.selected_hash.lock() {
                     *sel = t.hash.clone();
                 }
+                last_hash = t.hash.clone();
                 shared.toast(format!("Загружен: {disp}"));
             }
             Err(e) => {
@@ -1499,6 +1791,9 @@ fn upload_torrent_files(shared: &Arc<TorrServerShared>, paths: &[PathBuf]) {
         }
     }
     refresh_torrents_and_status(shared);
+    if !last_hash.is_empty() {
+        load_torrent_details_async(shared, &last_hash, false);
+    }
 }
 
 fn play_torrent_file(shared: &Arc<TorrServerShared>, hash: &str, requested_file_id: i32) {
@@ -1555,7 +1850,7 @@ fn play_torrent_file(shared: &Arc<TorrServerShared>, hash: &str, requested_file_
                 shared.toast(e);
                 return;
             }
-            let magnet = format!("magnet:?xt=urn:btih:{hash}");
+            let magnet = resolve_best_magnet(shared, hash);
             let video_count = files.iter().filter(|f| is_video_filename(&f.path)).count();
             if let Ok(mut hist) = shared.history.lock() {
                 upsert_history_watch(
@@ -2239,6 +2534,7 @@ fn push_search_to_ui(shared: &Arc<TorrServerShared>, err_msg: &str) {
             quality: r.quality.into(),
             tracker: r.tracker.into(),
             date_text: r.date_text.into(),
+            page_url: r.page_url.into(),
         })
         .collect();
 
@@ -2376,4 +2672,314 @@ fn sync_history_to_ui(shared: &Arc<TorrServerShared>, ui: &AppWindow) {
         .unwrap_or_default();
 
     ui.set_history_items(ModelRc::from(Rc::new(VecModel::from(items))));
+}
+
+fn load_torrents_links(path: &Path) -> HashMap<String, TorrentOriginMeta> {
+    if !path.exists() {
+        return HashMap::new();
+    }
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<HashMap<String, TorrentOriginMeta>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_torrents_links(path: &Path, map: &HashMap<String, TorrentOriginMeta>) {
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, json).is_ok() {
+            if path.exists() {
+                let _ = std::fs::remove_file(path);
+            }
+            let _ = std::fs::rename(&tmp, path);
+        }
+    }
+}
+
+fn record_torrent_origin(
+    shared: &Arc<TorrServerShared>,
+    hash: &str,
+    magnet: Option<&str>,
+    tracker_url: Option<&str>,
+    tracker_name: Option<&str>,
+    rt_topic_id: Option<&str>,
+) {
+    let key = hash.trim().to_lowercase();
+    if key.is_empty() {
+        return;
+    }
+    if let Ok(mut links) = shared.torrents_links.lock() {
+        let entry = links.entry(key).or_default();
+        let mut changed = false;
+        if let Some(m) = magnet {
+            let trimmed = m.trim();
+            if trimmed.starts_with("magnet:") && entry.magnet != trimmed {
+                entry.magnet = trimmed.to_string();
+                changed = true;
+            }
+        }
+        if let Some(u) = tracker_url {
+            let trimmed = u.trim();
+            if (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+                && entry.tracker_url != trimmed
+            {
+                entry.tracker_url = trimmed.to_string();
+                changed = true;
+            }
+        }
+        if let Some(tn) = tracker_name {
+            if !tn.trim().is_empty() && entry.tracker_name != tn.trim() {
+                entry.tracker_name = tn.trim().to_string();
+                changed = true;
+            }
+        }
+        if let Some(tid) = rt_topic_id {
+            if !tid.trim().is_empty() && entry.rutracker_topic_id != tid.trim() {
+                entry.rutracker_topic_id = tid.trim().to_string();
+                changed = true;
+            }
+        }
+        if changed {
+            save_torrents_links(&shared.paths.ts_torrents_links_path, &links);
+        }
+    }
+}
+
+fn resolve_best_magnet(shared: &Arc<TorrServerShared>, hash: &str) -> String {
+    let key = hash.trim().to_lowercase();
+    if let Ok(links) = shared.torrents_links.lock() {
+        if let Some(meta) = links.get(&key) {
+            if meta.magnet.starts_with("magnet:") {
+                return meta.magnet.clone();
+            }
+        }
+    }
+    format!("magnet:?xt=urn:btih:{hash}")
+}
+
+fn resolve_tracker_url(
+    shared: &Arc<TorrServerShared>,
+    cfg: &TorrServerConfig,
+    hash: &str,
+) -> Option<String> {
+    let key = hash.trim().to_lowercase();
+    if let Ok(links) = shared.torrents_links.lock() {
+        if let Some(meta) = links.get(&key) {
+            if meta.tracker_url.starts_with("http://") || meta.tracker_url.starts_with("https://") {
+                return Some(meta.tracker_url.clone());
+            }
+            if !meta.rutracker_topic_id.is_empty() {
+                return Some(format!(
+                    "{}/forum/viewtopic.php?t={}",
+                    cfg.effective_rutracker_mirror(),
+                    meta.rutracker_topic_id
+                ));
+            }
+        }
+    }
+    if let Ok(cache) = shared.detail_meta_cache.lock() {
+        if let Some(m) = cache.get(&key) {
+            if m.tracker_url.starts_with("http://") || m.tracker_url.starts_with("https://") {
+                return Some(m.tracker_url.clone());
+            }
+        }
+    }
+    None
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().chars().take(80).collect::<String>();
+    if trimmed.is_empty() {
+        "playlist".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn rgba_to_slint_image(img: &DecodedRgbaImage) -> Option<Image> {
+    if img.width == 0 || img.height == 0 || img.rgba.len() != (img.width * img.height * 4) as usize {
+        return None;
+    }
+    let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&img.rgba, img.width, img.height);
+    Some(Image::from_rgba8(buf))
+}
+
+fn clear_detail_ui(shared: &Arc<TorrServerShared>) {
+    shared.detail_generation.fetch_add(1, Ordering::SeqCst);
+    if let Ok(guard) = shared.ui_weak.lock() {
+        if let Some(weak) = guard.as_ref() {
+            let w_c = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = w_c.upgrade() {
+                    app.set_detail_loading(false);
+                    app.set_detail_title("".into());
+                    app.set_detail_original_title("".into());
+                    app.set_detail_year("".into());
+                    app.set_detail_genres("".into());
+                    app.set_detail_country("".into());
+                    app.set_detail_rating_kp("".into());
+                    app.set_detail_rating_imdb("".into());
+                    app.set_detail_description("".into());
+                    app.set_detail_source("".into());
+                    app.set_detail_tracker_url("".into());
+                    app.set_detail_has_poster(false);
+                    app.set_detail_screenshots(ModelRc::from(Rc::new(VecModel::<ScreenshotItem>::default())));
+                }
+            });
+        }
+    }
+}
+
+fn load_torrent_details_async(shared: &Arc<TorrServerShared>, hash: &str, force_refresh: bool) {
+    let target_hash = hash.trim().to_string();
+    if target_hash.is_empty() {
+        clear_detail_ui(shared);
+        return;
+    }
+    let hash_key = target_hash.to_lowercase();
+    let gen = shared.detail_generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+    let cached_t = shared
+        .cached_torrents
+        .lock()
+        .ok()
+        .and_then(|list| list.iter().find(|t| t.hash == target_hash).cloned());
+    let initial_title = cached_t
+        .as_ref()
+        .map(|t| t.display_title())
+        .unwrap_or_else(|| target_hash.clone());
+    let tracker_url_hint = resolve_tracker_url(shared, &shared.ts_config(), &target_hash).unwrap_or_default();
+
+    if let Ok(guard) = shared.ui_weak.lock() {
+        if let Some(weak) = guard.as_ref() {
+            let w_c = weak.clone();
+            let t_init = initial_title;
+            let tr_init = tracker_url_hint;
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = w_c.upgrade() {
+                    app.set_detail_loading(true);
+                    app.set_detail_title(t_init.into());
+                    app.set_detail_original_title("".into());
+                    app.set_detail_year("".into());
+                    app.set_detail_genres("".into());
+                    app.set_detail_country("".into());
+                    app.set_detail_rating_kp("".into());
+                    app.set_detail_rating_imdb("".into());
+                    app.set_detail_description("".into());
+                    app.set_detail_source("".into());
+                    app.set_detail_tracker_url(tr_init.into());
+                    app.set_detail_has_poster(false);
+                    app.set_detail_screenshots(ModelRc::from(Rc::new(VecModel::<ScreenshotItem>::default())));
+                }
+            });
+        }
+    }
+
+    let s = Arc::clone(shared);
+    thread::Builder::new()
+        .name("ts-rich-meta".to_string())
+        .spawn(move || {
+            let cfg = s.ts_config();
+            let torrent = match cached_t {
+                Some(t) => t,
+                None => TorrServerApi::from_config(&cfg)
+                    .get_torrent(&target_hash)
+                    .unwrap_or_else(|_| ApiTorrent {
+                        hash: target_hash.clone(),
+                        ..Default::default()
+                    }),
+            };
+            let origin = s
+                .torrents_links
+                .lock()
+                .ok()
+                .and_then(|m| m.get(&hash_key).cloned());
+
+            let payload = fetch_rich_metadata(
+                &s.paths.ts_posters_dir,
+                &cfg,
+                &s.rutracker,
+                &torrent,
+                origin.as_ref(),
+                force_refresh,
+            );
+
+            if !payload.meta.tracker_url.is_empty() {
+                record_torrent_origin(
+                    &s,
+                    &target_hash,
+                    None,
+                    Some(&payload.meta.tracker_url),
+                    None,
+                    None,
+                );
+            }
+            if let Ok(mut cache) = s.detail_meta_cache.lock() {
+                cache.insert(hash_key.clone(), payload.meta.clone());
+            }
+
+            if s.detail_generation.load(Ordering::SeqCst) != gen {
+                return;
+            }
+            let still_selected = s
+                .selected_hash
+                .lock()
+                .map(|sel| sel.eq_ignore_ascii_case(&target_hash))
+                .unwrap_or(false);
+            if !still_selected {
+                return;
+            }
+
+            if let Ok(guard) = s.ui_weak.lock() {
+                if let Some(weak) = guard.as_ref() {
+                    let w_c = weak.clone();
+                    let s_check = Arc::clone(&s);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if s_check.detail_generation.load(Ordering::SeqCst) != gen {
+                            return;
+                        }
+                        if let Some(app) = w_c.upgrade() {
+                            app.set_detail_loading(false);
+                            app.set_detail_title(payload.meta.title.into());
+                            app.set_detail_original_title(payload.meta.original_title.into());
+                            app.set_detail_year(payload.meta.year.into());
+                            app.set_detail_genres(payload.meta.genres.into());
+                            app.set_detail_country(payload.meta.country.into());
+                            app.set_detail_rating_kp(payload.meta.rating_kp.into());
+                            app.set_detail_rating_imdb(payload.meta.rating_imdb.into());
+                            app.set_detail_description(payload.meta.description.into());
+                            app.set_detail_source(payload.meta.source_label.into());
+                            app.set_detail_tracker_url(payload.meta.tracker_url.into());
+
+                            if let Some(poster_rgba) = payload.poster.as_ref().and_then(rgba_to_slint_image) {
+                                app.set_detail_poster(poster_rgba);
+                                app.set_detail_has_poster(true);
+                            } else {
+                                app.set_detail_has_poster(false);
+                            }
+
+                            let shots: Vec<ScreenshotItem> = payload
+                                .screenshots
+                                .iter()
+                                .filter_map(|d| {
+                                    rgba_to_slint_image(d).map(|img| ScreenshotItem {
+                                        img,
+                                        url: d.url.clone().into(),
+                                    })
+                                })
+                                .collect();
+                            app.set_detail_screenshots(ModelRc::from(Rc::new(VecModel::from(shots))));
+                        }
+                    });
+                }
+            }
+        })
+        .ok();
 }

@@ -17,6 +17,7 @@ rfd = "0.15"
 chrono = "0.4"
 raw-window-handle = "0.6"
 urlencoding = "2.1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 
 [target.'cfg(windows)'.dependencies]
 wry = { version = "0.50", default-features = false, features = ["os-webview"] }

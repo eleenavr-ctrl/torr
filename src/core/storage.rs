@@ -14,6 +14,8 @@ pub struct PortablePaths {
     pub ts_playlists_dir: PathBuf,
     pub ts_history_path: PathBuf,
     pub ts_torrents_meta_path: PathBuf,
+    pub ts_torrents_links_path: PathBuf,
+    pub ts_posters_dir: PathBuf,
     pub ts_webview_dir: PathBuf,
     pub modules_dir: PathBuf,
 }
@@ -31,6 +33,7 @@ impl PortablePaths {
         let torrserver_dir = data_dir.join("torrserver");
         let ts_cache_dir = torrserver_dir.join("ts_cache");
         let ts_playlists_dir = torrserver_dir.join("playlists");
+        let ts_posters_dir = torrserver_dir.join("posters");
         let modules_dir = data_dir.join("modules");
 
         for dir in [
@@ -38,6 +41,7 @@ impl PortablePaths {
             &torrserver_dir,
             &ts_cache_dir,
             &ts_playlists_dir,
+            &ts_posters_dir,
             &modules_dir,
         ] {
             fs::create_dir_all(dir)
@@ -51,6 +55,8 @@ impl PortablePaths {
             torrserver_exe: torrserver_dir.join("TorrServer-windows-amd64.exe"),
             ts_history_path: torrserver_dir.join("history.json"),
             ts_torrents_meta_path: torrserver_dir.join("torrents_meta.json"),
+            ts_torrents_links_path: torrserver_dir.join("torrents_links.json"),
+            ts_posters_dir,
             ts_webview_dir: torrserver_dir.join("webview2"),
             data_dir,
             torrserver_dir,
@@ -59,6 +65,15 @@ impl PortablePaths {
             modules_dir,
         })
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct TorrentOriginMeta {
+    pub magnet: String,
+    pub tracker_url: String,
+    pub tracker_name: String,
+    pub rutracker_topic_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +129,7 @@ pub struct TorrServerConfig {
     pub rutracker_cookie: String,
     pub rutracker_user_agent: String,
     pub rutracker_use_webview: bool,
+    pub kinopoisk_api_key: String,
 }
 
 impl Default for TorrServerConfig {
@@ -149,6 +165,7 @@ impl Default for TorrServerConfig {
             rutracker_cookie: String::new(),
             rutracker_user_agent: String::new(),
             rutracker_use_webview: false,
+            kinopoisk_api_key: String::new(),
         }
     }
 }

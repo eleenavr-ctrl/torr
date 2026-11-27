@@ -20,6 +20,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     in-out property <bool> engine-versions-loading: false;
     in-out property <bool> engine-watchdog: true;
     in-out property <bool> keep-engine-on-exit: false;
+    in-out property <string> kp-api-key: "";
 
     // 2. Cache & network
     in-out property <string> ts-cache-size-mb: "64";
@@ -188,6 +189,24 @@ export component TorrServerSettingsSection inherits VerticalLayout {
                 text <=> root.ts-password;
                 input-type: InputType.password;
                 placeholder-text: "Пароль (опционально)";
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                width: 180px;
+                text: "API-ключ Кинопоиска (опц.):";
+                font-family: Theme.font-ui;
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            LineEdit {
+                horizontal-stretch: 1;
+                text <=> root.kp-api-key;
+                input-type: InputType.password;
+                placeholder-text: "kinopoiskapiunofficial.tech (без ключа работает IMDb + Wikipedia)";
             }
         }
 

@@ -16,8 +16,8 @@ export component SearchView inherits Rectangle {
     callback set-quality(string);
     callback set-sort(int);
     callback set-source(int);
-    callback add-search-result(string, string);
-    callback play-search-result(string, string);
+    callback add-search-result(string, string, string);
+    callback play-search-result(string, string, string);
 
     background: transparent;
 
@@ -326,13 +326,13 @@ export component SearchView inherits Rectangle {
                                 FluentButton {
                                     text: "+ В раздачи";
                                     compact: true;
-                                    clicked => { root.add-search-result(res.magnet, res.title); }
+                                    clicked => { root.add-search-result(res.magnet, res.title, res.page-url); }
                                 }
                                 FluentButton {
                                     text: "▶ Смотреть";
                                     compact: true;
                                     primary: true;
-                                    clicked => { root.play-search-result(res.magnet, res.title); }
+                                    clicked => { root.play-search-result(res.magnet, res.title, res.page-url); }
                                 }
                             }
                         }
