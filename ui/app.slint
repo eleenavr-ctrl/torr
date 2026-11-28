@@ -226,7 +226,7 @@ export component AppWindow inherits Window {
     VerticalLayout {
         if (Win11Theme.is-mobile) : MobileHeaderBar { }
 
-        HorizontalLayout {
+        main-body := HorizontalLayout {
             vertical-stretch: 1;
 
             if (!Win11Theme.is-mobile) : DesktopSidebar {
@@ -338,30 +338,9 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Desktop Context Panel (320px)
+            // Reserved layout space for Desktop Context Panel (320px)
             if (Win11Theme.is-desktop && (root.detail-panel-open || root.active-tab == 3)) : Rectangle {
                 width: Win11Theme.detail-w; background: Win11Theme.window-bg;
-                HorizontalLayout {
-                    padding-top: 12px; padding-bottom: 12px; padding-right: 12px;
-                    ContextSidePanel {
-                        horizontal-stretch: 1; active-tab: root.active-tab;
-                        diag-app-version: root.diag-app-version; diag-engine-version: root.diag-engine-version; diag-binary-status: root.diag-binary-status;
-                        diag-port-status: root.diag-port-status; diag-api-ping: root.diag-api-ping; diag-problem-hint: root.diag-problem-hint; diag-has-problem: root.diag-has-problem;
-                        torrent-hash: root.selected-torrent-hash; torrent-title: root.selected-torrent-title; loading: root.detail-loading;
-                        title: root.detail-title; original-title: root.detail-original-title; year: root.detail-year; genres: root.detail-genres;
-                        country: root.detail-country; rating-kp: root.detail-rating-kp; rating-imdb: root.detail-rating-imdb; description: root.detail-description;
-                        source-label: root.detail-source; tracker-url: root.detail-tracker-url; poster: root.detail-poster; has-poster: root.detail-has-poster;
-                        screenshots: root.detail-screenshots; files: root.selected-files; only-video-files <=> root.only-video-files;
-                        run-diagnostics-now => { root.run-diagnostics-now(); } copy-diagnostics-report => { root.copy-diagnostics-report(); }
-                        copy-diagnostics-for-ai => { root.copy-diagnostics-for-ai(); } clear-diagnostics-logs => { root.clear-diagnostics-logs(); }
-                        close-panel => { root.detail-panel-open = false; } refresh-metadata(h) => { root.refresh-torrent-metadata(h); }
-                        play-file(h, id) => { root.play-file(h, id); } play-all-m3u(h) => { root.play-all-m3u(h); }
-                        copy-stream-url(h, id) => { root.copy-stream-url(h, id); } toggle-only-video(v) => { root.toggle-only-video(v); }
-                        open-external-url(u) => { root.open-external-url(u); }
-                        open-lightbox(img, u) => { root.lightbox-image = img; root.lightbox-url = u; root.lightbox-visible = true; }
-                        watch-trailer(h, t) => { root.watch-trailer(h, t); }
-                    }
-                }
             }
         }
 
@@ -399,28 +378,34 @@ export component AppWindow inherits Window {
     if (!Win11Theme.is-desktop && AppState.mobile-detail-open) : Rectangle {
         x: 0px; y: 0px; width: root.width; height: root.height; background: #00000070;
         TouchArea { clicked => { AppState.mobile-detail-open = false; } }
-        Rectangle {
-            x: root.width - min(340px, root.width * 0.92); y: 0px;
-            width: min(340px, root.width * 0.92); height: root.height; background: Win11Theme.window-bg;
-            TouchArea { }
-            ContextSidePanel {
-                width: parent.width; height: parent.height; active-tab: root.active-tab;
-                diag-app-version: root.diag-app-version; diag-engine-version: root.diag-engine-version; diag-binary-status: root.diag-binary-status;
-                diag-port-status: root.diag-port-status; diag-api-ping: root.diag-api-ping; diag-problem-hint: root.diag-problem-hint; diag-has-problem: root.diag-has-problem;
-                torrent-hash: root.selected-torrent-hash; torrent-title: root.selected-torrent-title; loading: root.detail-loading;
-                title: root.detail-title; original-title: root.detail-original-title; year: root.detail-year; genres: root.detail-genres;
-                country: root.detail-country; rating-kp: root.detail-rating-kp; rating-imdb: root.detail-rating-imdb; description: root.detail-description;
-                source-label: root.detail-source; tracker-url: root.detail-tracker-url; poster: root.detail-poster; has-poster: root.detail-has-poster;
-                screenshots: root.detail-screenshots; files: root.selected-files; only-video-files <=> root.only-video-files;
-                run-diagnostics-now => { root.run-diagnostics-now(); } copy-diagnostics-report => { root.copy-diagnostics-report(); }
-                copy-diagnostics-for-ai => { root.copy-diagnostics-for-ai(); } clear-diagnostics-logs => { root.clear-diagnostics-logs(); }
-                close-panel => { AppState.mobile-detail-open = false; } refresh-metadata(h) => { root.refresh-torrent-metadata(h); }
-                play-file(h, id) => { root.play-file(h, id); } play-all-m3u(h) => { root.play-all-m3u(h); }
-                copy-stream-url(h, id) => { root.copy-stream-url(h, id); } toggle-only-video(v) => { root.toggle-only-video(v); }
-                open-external-url(u) => { root.open-external-url(u); }
-                open-lightbox(img, u) => { root.lightbox-image = img; root.lightbox-url = u; root.lightbox-visible = true; }
-                watch-trailer(h, t) => { root.watch-trailer(h, t); }
-            }
+    }
+
+    // Single shared ContextSidePanel (Desktop right column OR Mobile/Tablet slide-over drawer)
+    if ((Win11Theme.is-desktop && (root.detail-panel-open || root.active-tab == 3)) || (!Win11Theme.is-desktop && AppState.mobile-detail-open)) : Rectangle {
+        x: Win11Theme.is-desktop ? (root.width - Win11Theme.detail-w) : (root.width - min(340px, root.width * 0.92));
+        y: Win11Theme.is-desktop ? (main-body.y + 12px) : 0px;
+        width: Win11Theme.is-desktop ? max(0px, Win11Theme.detail-w - 12px) : min(340px, root.width * 0.92);
+        height: Win11Theme.is-desktop ? max(0px, main-body.height - 24px) : root.height;
+        background: Win11Theme.window-bg;
+        TouchArea { }
+        ContextSidePanel {
+            width: parent.width; height: parent.height; active-tab: root.active-tab;
+            diag-app-version: root.diag-app-version; diag-engine-version: root.diag-engine-version; diag-binary-status: root.diag-binary-status;
+            diag-port-status: root.diag-port-status; diag-api-ping: root.diag-api-ping; diag-problem-hint: root.diag-problem-hint; diag-has-problem: root.diag-has-problem;
+            torrent-hash: root.selected-torrent-hash; torrent-title: root.selected-torrent-title; loading: root.detail-loading;
+            title: root.detail-title; original-title: root.detail-original-title; year: root.detail-year; genres: root.detail-genres;
+            country: root.detail-country; rating-kp: root.detail-rating-kp; rating-imdb: root.detail-rating-imdb; description: root.detail-description;
+            source-label: root.detail-source; tracker-url: root.detail-tracker-url; poster: root.detail-poster; has-poster: root.detail-has-poster;
+            screenshots: root.detail-screenshots; files: root.selected-files; only-video-files <=> root.only-video-files;
+            run-diagnostics-now => { root.run-diagnostics-now(); } copy-diagnostics-report => { root.copy-diagnostics-report(); }
+            copy-diagnostics-for-ai => { root.copy-diagnostics-for-ai(); } clear-diagnostics-logs => { root.clear-diagnostics-logs(); }
+            close-panel => { if (Win11Theme.is-desktop) { root.detail-panel-open = false; } else { AppState.mobile-detail-open = false; } }
+            refresh-metadata(h) => { root.refresh-torrent-metadata(h); }
+            play-file(h, id) => { root.play-file(h, id); } play-all-m3u(h) => { root.play-all-m3u(h); }
+            copy-stream-url(h, id) => { root.copy-stream-url(h, id); } toggle-only-video(v) => { root.toggle-only-video(v); }
+            open-external-url(u) => { root.open-external-url(u); }
+            open-lightbox(img, u) => { root.lightbox-image = img; root.lightbox-url = u; root.lightbox-visible = true; }
+            watch-trailer(h, t) => { root.watch-trailer(h, t); }
         }
     }
 

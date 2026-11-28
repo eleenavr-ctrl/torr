@@ -31,8 +31,15 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run unit tests (Windows x64)
-        run: cargo test --target x86_64-pc-windows-msvc
+      - name: Run unit tests (dev, on push)
+        if: "!startsWith(github.ref, 'refs/tags/v') && github.event_name != 'workflow_dispatch'"
+        run: cargo test --lib --target x86_64-pc-windows-msvc
+
+      - name: Run unit tests (release, shared cache for binary)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+        run: cargo test --lib --release --target x86_64-pc-windows-msvc
 
       - name: Upload Cargo.lock for caching
         uses: actions/upload-artifact@v4
@@ -104,7 +111,7 @@ jobs:
 
       - name: Clippy check (advisory)
         continue-on-error: true
-        run: cargo clippy --target x86_64-pc-windows-msvc
+        run: cargo clippy --lib --target x86_64-pc-windows-msvc
 
       - name: Install prebuilt cargo-audit
         uses: taiki-e/install-action@v2
