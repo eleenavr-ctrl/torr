@@ -1,4 +1,4 @@
-name: Build Windows x64
+name: Build Portable Windows x64 (.exe)
 
 on:
   push:
@@ -16,7 +16,7 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  test-and-release:
+  build:
     runs-on: windows-latest
 
     steps:
@@ -31,96 +31,25 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run unit tests (dev, on push)
-        if: "!startsWith(github.ref, 'refs/tags/v') && github.event_name != 'workflow_dispatch'"
-        run: cargo test --lib --target x86_64-pc-windows-msvc
-
-      - name: Run unit tests (release, shared cache for binary)
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        env:
-          RUSTFLAGS: "-C target-feature=+crt-static"
-        run: cargo test --lib --release --target x86_64-pc-windows-msvc
-
-      - name: Upload Cargo.lock for caching
-        uses: actions/upload-artifact@v4
-        with:
-          name: Cargo.lock
-          path: Cargo.lock
-          if-no-files-found: warn
-
-      - name: Build release binary (crt-static)
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        env:
-          RUSTFLAGS: "-C target-feature=+crt-static"
+      - name: Build single portable Windows .exe
         run: cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Package portable artifacts and SHA256SUMS
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+      - name: Prepare TorrServerUI.exe
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item -Path "target/x86_64-pc-windows-msvc/release/torrserver-ui.exe" -Destination "dist/TorrServerUI.exe" -Force
-          Compress-Archive -Path "dist/TorrServerUI.exe" -DestinationPath "dist/TorrServerUI-Windows-x64-Portable.zip" -Force
-          $exeHash = (Get-FileHash -Path "dist/TorrServerUI.exe" -Algorithm SHA256).Hash.ToLower()
-          $zipHash = (Get-FileHash -Path "dist/TorrServerUI-Windows-x64-Portable.zip" -Algorithm SHA256).Hash.ToLower()
-          @(
-            "$exeHash  TorrServerUI.exe",
-            "$zipHash  TorrServerUI-Windows-x64-Portable.zip"
-          ) | Set-Content -Path "dist/SHA256SUMS.txt" -Encoding utf8
 
-      - name: Upload portable build artifacts
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+      - name: Upload TorrServerUI.exe artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TorrServerUI-windows-x64
-          path: |
-            dist/TorrServerUI.exe
-            dist/TorrServerUI-Windows-x64-Portable.zip
-            dist/SHA256SUMS.txt
+          name: TorrServerUI.exe
+          path: dist/TorrServerUI.exe
           if-no-files-found: error
 
       - name: Publish GitHub Release on tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/TorrServerUI.exe
-            dist/TorrServerUI-Windows-x64-Portable.zip
-            dist/SHA256SUMS.txt
+          files: dist/TorrServerUI.exe
           generate_release_notes: true
-
-  lint-and-audit:
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain + clippy/rustfmt
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-          components: rustfmt, clippy
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Format check (advisory)
-        continue-on-error: true
-        run: cargo fmt --check
-
-      - name: Clippy check (advisory)
-        continue-on-error: true
-        run: cargo clippy --lib --target x86_64-pc-windows-msvc
-
-      - name: Install prebuilt cargo-audit
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-audit
-
-      - name: Security audit (advisory)
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          if (!(Test-Path "Cargo.lock")) { cargo generate-lockfile }
-          cargo audit
