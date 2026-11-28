@@ -18,8 +18,6 @@ export component SvgIcon inherits Rectangle {
         fill: root.fill-color;
         stroke: root.stroke-color;
         stroke-width: 2px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
     }
 }
 
@@ -374,10 +372,18 @@ export component SettingsExpander inherits Rectangle {
             }
         }
         if (root.expanded) : Rectangle { height: 1px; background: Win11Theme.border-color; }
-        if (root.expanded) : VerticalLayout {
-            padding: 14px;
-            spacing: 10px;
-            @children
+        body-wrap := Rectangle {
+            clip: true;
+            visible: root.expanded;
+            height: root.expanded ? body-col.preferred-height : 0px;
+            body-col := VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                padding: 14px;
+                spacing: 10px;
+                @children
+            }
         }
     }
 }

@@ -202,7 +202,7 @@ export component TorrentsView inherits Rectangle {
         }
 
         // Engine Missing / Update Banner
-        if (!root.is-remote-mode && (root.engine-missing && !root.status-healthy || root.engine-updating)) : Rectangle {
+        if (!root.is-remote-mode && ((root.engine-missing && !root.status-healthy) || root.engine-updating)) : Rectangle {
             border-radius: Win11Theme.radius-card;
             background: Win11Theme.info-bg;
             border-width: 1px;
