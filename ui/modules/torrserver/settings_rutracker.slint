@@ -2,7 +2,7 @@ import { LineEdit, Switch } from "std-widgets.slint";
 import { Win11Theme } from "../../theme.slint";
 import { FluentButton, SettingsExpander } from "../../components.slint";
 
-export component RuTrackerSettingsExpander inherits Rectangle {
+export component RuTrackerSettingsExpander inherits VerticalLayout {
     in-out property <bool> rt-enabled: false;
     in-out property <bool> rt-use-webview: false;
     in-out property <string> rt-mirror: "https://rutracker.org";
@@ -33,28 +33,28 @@ export component RuTrackerSettingsExpander inherits Rectangle {
 
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 130px; text: @tr("Зеркало:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 130px; text: @tr("Зеркало:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.rt-mirror; placeholder-text: "https://rutracker.org"; }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 130px; text: @tr("Логин / Пароль:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 130px; text: @tr("Логин / Пароль:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.rt-username; placeholder-text: @tr("Логин"); }
             LineEdit { horizontal-stretch: 1; text <=> root.rt-password; input-type: InputType.password; placeholder-text: @tr("Пароль"); }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 130px; text: @tr("Прокси (опц.):"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 130px; text: @tr("Прокси (опц.):"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.rt-proxy; placeholder-text: "socks5h://127.0.0.1:1080"; }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 130px; text: @tr("Cookie (опц.):"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 130px; text: @tr("Cookie (опц.):"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.rt-cookie; placeholder-text: "bb_session=...; cf_clearance=..."; }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 130px; text: "User-Agent:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 130px; text: "User-Agent:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.rt-user-agent; placeholder-text: @tr("Оставьте пустым для стандартного UA"); }
         }
         if (root.rt-auth-status != "") : Text {
@@ -73,10 +73,12 @@ export component RuTrackerSettingsExpander inherits Rectangle {
                 clicked => { root.save-and-test-rutracker(); }
             }
             FluentButton {
+                compact: !Win11Theme.is-desktop;
                 text: @tr("Войти через WebView2");
                 icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 3 12 L 21 12";
                 clicked => { root.open-rutracker-webview(); }
             }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 }

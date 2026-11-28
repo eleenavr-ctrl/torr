@@ -239,17 +239,24 @@ export component TorrentDetailPanel inherits FluentCard {
                                     badge-bg: #F5C51822;
                                     text-color: Win11Theme.status-warn;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
-                            if (root.genres != "") : MediaBadge {
-                                text: root.genres;
+                            if (root.genres != "") : HorizontalLayout {
+                                MediaBadge {
+                                    max-width: 164px;
+                                    text: root.genres;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                             }
-                            Rectangle { vertical-stretch: 1; }
-                            FluentButton {
-                                text: @tr("Трейлер");
-                                primary: true;
-                                compact: true;
-                                icon-path: "M 7 5 L 19 12 L 7 19 Z";
-                                clicked => { root.watch-trailer(root.torrent-hash, root.title != "" ? root.title : root.torrent-title); }
+                            HorizontalLayout {
+                                FluentButton {
+                                    text: @tr("Трейлер");
+                                    primary: true;
+                                    compact: true;
+                                    icon-path: "M 7 5 L 19 12 L 7 19 Z";
+                                    clicked => { root.watch-trailer(root.torrent-hash, root.title != "" ? root.title : root.torrent-title); }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                             }
                         }
                     }
@@ -447,6 +454,9 @@ export component TorrentDetailPanel inherits FluentCard {
                         clip: true;
                         Image { width: parent.width; height: parent.height; source: root.screenshots[pair-idx + 1].img; image-fit: cover; }
                         TouchArea { mouse-cursor: pointer; clicked => { root.open-lightbox(root.screenshots[pair-idx + 1].img, root.screenshots[pair-idx + 1].url); } }
+                    }
+                    if (pair-idx < root.screenshots.length && pair-idx + 1 >= root.screenshots.length) : Rectangle {
+                        horizontal-stretch: 1;
                     }
                 }
             }

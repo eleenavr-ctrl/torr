@@ -65,13 +65,6 @@ export component SearchView inherits Rectangle {
                     FilterPill { text: "RuTracker"; active: root.source-mode == 2; clicked => { root.set-source(2); } }
                     FilterPill { text: "JacRed"; active: root.source-mode == 3; clicked => { root.set-source(3); } }
                     Rectangle { horizontal-stretch: 1; }
-                    if (!Win11Theme.is-mobile) : HorizontalLayout {
-                        spacing: 4px;
-                        FilterPill { text: "ALL"; active: root.quality-filter == "ALL"; clicked => { root.set-quality("ALL"); } }
-                        FilterPill { text: "1080p"; active: root.quality-filter == "1080p"; clicked => { root.set-quality("1080p"); } }
-                        FilterPill { text: "4K"; active: root.quality-filter == "4K"; clicked => { root.set-quality("4K"); } }
-                        FilterPill { text: "HDR"; active: root.quality-filter == "HDR"; clicked => { root.set-quality("HDR"); } }
-                    }
                 }
 
                 HorizontalLayout {
@@ -80,6 +73,14 @@ export component SearchView inherits Rectangle {
                     FilterPill { text: @tr("Дата"); active: root.sort-mode == 1; clicked => { root.set-sort(1); } }
                     FilterPill { text: @tr("Размер"); active: root.sort-mode == 2; clicked => { root.set-sort(2); } }
                     FilterPill { text: @tr("Имя"); active: root.sort-mode == 3; clicked => { root.set-sort(3); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if (!Win11Theme.is-mobile) : HorizontalLayout {
+                        spacing: 4px;
+                        FilterPill { text: "ALL"; active: root.quality-filter == "ALL"; clicked => { root.set-quality("ALL"); } }
+                        FilterPill { text: "1080p"; active: root.quality-filter == "1080p"; clicked => { root.set-quality("1080p"); } }
+                        FilterPill { text: "4K"; active: root.quality-filter == "4K"; clicked => { root.set-quality("4K"); } }
+                        FilterPill { text: "HDR"; active: root.quality-filter == "HDR"; clicked => { root.set-quality("HDR"); } }
+                    }
                 }
             }
         }
@@ -101,6 +102,7 @@ export component SearchView inherits Rectangle {
 
             if (root.results.length == 0) : VerticalLayout {
                 alignment: center;
+                padding: 24px;
                 spacing: 8px;
                 Text {
                     text: root.loading ? @tr("Загрузка раздач с трекеров...") : @tr("Введите запрос или откройте Топ 24ч");
@@ -109,6 +111,7 @@ export component SearchView inherits Rectangle {
                     font-weight: 600;
                     color: Win11Theme.text-primary;
                     horizontal-alignment: center;
+                    wrap: word-wrap;
                 }
                 HorizontalLayout {
                     alignment: center;
@@ -165,6 +168,7 @@ export component SearchView inherits Rectangle {
                                         color: res.seeds > 5 ? Win11Theme.status-ok : Win11Theme.text-secondary;
                                         vertical-alignment: center;
                                     }
+                                    Rectangle { horizontal-stretch: 1; }
                                 }
                             }
                             HorizontalLayout {

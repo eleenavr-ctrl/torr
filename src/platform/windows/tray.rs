@@ -88,11 +88,11 @@ impl TrayHandle {
                                 button: MouseButton::Left,
                                 button_state: MouseButtonState::Up,
                                 ..
-                            }
-                            | TrayIconEvent::DoubleClick {
+                            } => cb_tray(TrayCommand::ToggleWindow),
+                            TrayIconEvent::DoubleClick {
                                 button: MouseButton::Left,
                                 ..
-                            } => cb_tray(TrayCommand::ToggleWindow),
+                            } => cb_tray(TrayCommand::ShowWindow),
                             _ => {}
                         }
                     }));

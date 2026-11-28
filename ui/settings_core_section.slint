@@ -128,23 +128,32 @@ export component CoreSettingsSection inherits VerticalLayout {
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: "URL / Auth:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: "WebDAV URL:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.webdav-url; placeholder-text: "https://webdav.yandex.ru"; }
-            LineEdit { width: 110px; text <=> root.webdav-user; placeholder-text: @tr("Логин"); }
-            LineEdit { width: 110px; text <=> root.webdav-pass; input-type: InputType.password; placeholder-text: @tr("Пароль"); }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: @tr("Хранение секретов:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Логин / Пароль:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.webdav-user; placeholder-text: @tr("Логин"); }
+            LineEdit { horizontal-stretch: 1; text <=> root.webdav-pass; input-type: InputType.password; placeholder-text: @tr("Пароль"); }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Хранение секретов:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             ComboBox { horizontal-stretch: 1; model: ["Windows DPAPI (без пароля)", "Мастер-пароль (Argon2 + ChaCha20)"]; current-index <=> root.secret-mode; }
-            if (root.secret-mode == 1) : LineEdit { width: 140px; text <=> root.master-password; input-type: InputType.password; placeholder-text: @tr("Мастер-пароль"); }
+        }
+        if (root.secret-mode == 1) : HorizontalLayout {
+            spacing: 8px;
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Мастер-пароль:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.master-password; input-type: InputType.password; placeholder-text: @tr("Введите мастер-пароль"); }
         }
         Switch { text: @tr("Синхронизировать снапшот БД app_data.db (VACUUM INTO)"); checked <=> root.webdav-sync-db; }
         HorizontalLayout {
             spacing: 6px;
-            FluentButton { text: @tr("Сохранить"); primary: true; clicked => { root.save-webdav-settings(); } }
-            FluentButton { text: @tr("Проверить"); clicked => { root.test-webdav-connection(); } }
-            FluentButton { text: @tr("Синхронизировать"); clicked => { root.sync-webdav-now(); } }
+            FluentButton { compact: !Win11Theme.is-desktop; text: @tr("Сохранить"); primary: true; clicked => { root.save-webdav-settings(); } }
+            FluentButton { compact: !Win11Theme.is-desktop; text: @tr("Проверить"); clicked => { root.test-webdav-connection(); } }
+            FluentButton { compact: !Win11Theme.is-desktop; text: @tr("Синхронизировать"); clicked => { root.sync-webdav-now(); } }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 
@@ -164,6 +173,7 @@ export component CoreSettingsSection inherits VerticalLayout {
         Text { text: root.profiler-crash-status; font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; }
         HorizontalLayout {
             FluentButton { text: @tr("Экспорт отчёта в UserData/Exports/"); clicked => { root.export-profiler-report(); } }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 

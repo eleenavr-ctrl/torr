@@ -259,7 +259,7 @@ export component AppWindow inherits Window {
                     info-speed: root.info-speed; info-peers: root.info-peers; info-files-count: root.info-files-count;
                     info-tracker-url: root.info-tracker-url; info-ratings: root.info-ratings; info-magnet: root.info-magnet;
                     add-magnet(m) => { root.add-magnet(m); } paste-and-add-magnet => { root.paste-and-add-magnet(); }
-                    pick-torrent-file => { root.pick-torrent-file(); } select-torrent(h) => { root.select-torrent(h); }
+                    pick-torrent-file => { root.pick-torrent-file(); } select-torrent(h) => { root.detail-panel-open = true; root.select-torrent(h); }
                     refresh-torrents => { root.refresh-torrents(); } set-torrents-sort(m) => { root.set-torrents-sort(m); }
                     set-torrents-filter(f) => { root.set-torrents-filter(f); } drop-torrent(h) => { root.drop-torrent(h); }
                     remove-torrent(h) => { root.remove-torrent(h); } copy-torrent-magnet(h) => { root.copy-torrent-magnet(h); }

@@ -97,6 +97,8 @@ unsafe extern "system" fn subclass_wndproc(
     CallWindowProcW(prev_proc, hwnd, msg, wparam, lparam)
 }
 
+static SUBCLASSED_HWND: AtomicIsize = AtomicIsize::new(0);
+
 pub fn install_win32_subclass(hwnd_val: isize, registry: Arc<Mutex<ModuleRegistry>>) {
     let _ = DROP_REGISTRY.set(registry);
     #[cfg(windows)]
@@ -104,14 +106,18 @@ pub fn install_win32_subclass(hwnd_val: isize, registry: Arc<Mutex<ModuleRegistr
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::UI::Shell::DragAcceptFiles;
         use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
-        if hwnd_val == 0 {
+        if hwnd_val == 0 || SUBCLASSED_HWND.load(Ordering::SeqCst) == hwnd_val {
             return;
         }
         unsafe {
             let hwnd = hwnd_val as HWND;
             DragAcceptFiles(hwnd, 1);
-            let prev = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, subclass_wndproc as *const () as isize);
-            PREV_WNDPROC.store(prev, Ordering::SeqCst);
+            let target_proc = subclass_wndproc as *const () as isize;
+            let prev = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, target_proc);
+            if prev != 0 && prev != target_proc {
+                PREV_WNDPROC.store(prev, Ordering::SeqCst);
+            }
+            SUBCLASSED_HWND.store(hwnd_val, Ordering::SeqCst);
         }
     }
     #[cfg(not(windows))]

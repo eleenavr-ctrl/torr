@@ -40,6 +40,7 @@ export component HistoryView inherits Rectangle {
 
             if (root.items.length == 0) : VerticalLayout {
                 alignment: center;
+                padding: 24px;
                 spacing: 6px;
                 Text {
                     text: root.only-favorites ? @tr("В избранном пока пусто") : @tr("История просмотров пуста");
@@ -48,6 +49,7 @@ export component HistoryView inherits Rectangle {
                     font-weight: 600;
                     color: Win11Theme.text-primary;
                     horizontal-alignment: center;
+                    wrap: word-wrap;
                 }
                 Text {
                     text: @tr("Запустите видеофайл из раздачи, чтобы сохранить прогресс просмотра.");
@@ -55,6 +57,7 @@ export component HistoryView inherits Rectangle {
                     font-size: 11px;
                     color: Win11Theme.text-secondary;
                     horizontal-alignment: center;
+                    wrap: word-wrap;
                 }
             }
 

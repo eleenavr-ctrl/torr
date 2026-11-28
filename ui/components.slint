@@ -39,6 +39,7 @@ export component FluentButton inherits Rectangle {
 
     height: root.compact ? Win11Theme.btn-compact-h : Win11Theme.ctrl-h;
     min-width: root.text == "" ? (root.compact ? 28px : 34px) : (root.compact ? 56px : 78px);
+    horizontal-stretch: 0;
     border-radius: Win11Theme.radius-ctrl;
     border-width: root.primary ? 0px : 1px;
     border-color: root.danger ? Win11Theme.status-err : Win11Theme.border-color;
@@ -104,7 +105,7 @@ export component FluentNavItem inherits Rectangle {
     HorizontalLayout {
         padding-left: 4px;
         padding-right: root.compact-rail ? 4px : 6px;
-        spacing: root.compact-rail ? 0px : 8px;
+        spacing: root.compact-rail ? 4px : 8px;
         alignment: root.compact-rail ? center : start;
 
         VerticalLayout {
@@ -163,6 +164,7 @@ export component FilterPill inherits Rectangle {
     callback clicked();
 
     height: Win11Theme.is-mobile ? 34px : 26px;
+    horizontal-stretch: 0;
     border-radius: 13px;
     border-width: 1px;
     border-color: root.active ? Win11Theme.accent : Win11Theme.border-color;
@@ -204,6 +206,8 @@ export component MediaBadge inherits Rectangle {
     in property <color> text-color: Win11Theme.text-secondary;
 
     height: 18px;
+    horizontal-stretch: 0;
+    max-width: 220px;
     border-radius: 4px;
     background: root.badge-bg;
     HorizontalLayout {
@@ -216,6 +220,7 @@ export component MediaBadge inherits Rectangle {
             font-weight: 600;
             color: root.text-color;
             vertical-alignment: center;
+            overflow: elide;
         }
     }
 }

@@ -25,7 +25,10 @@ export component DesktopSidebar inherits Rectangle {
         if (Win11Theme.is-desktop) : HorizontalLayout {
             padding: 6px;
             spacing: 8px;
-            Image { width: 22px; height: 22px; source: root.app-icon; }
+            VerticalLayout {
+                alignment: center;
+                Image { width: 22px; height: 22px; source: root.app-icon; }
+            }
             VerticalLayout {
                 alignment: center;
                 Text {

@@ -146,10 +146,14 @@ export component TorrServerSettingsSection inherits VerticalLayout {
 
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 145px; text: "Basic Auth / КП API:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 145px; text: "Basic Auth:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.ts-username; placeholder-text: @tr("Логин"); }
             LineEdit { horizontal-stretch: 1; text <=> root.ts-password; input-type: InputType.password; placeholder-text: @tr("Пароль"); }
-            LineEdit { horizontal-stretch: 1; text <=> root.kp-api-key; input-type: InputType.password; placeholder-text: @tr("Ключ КП (опц.)"); }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: Win11Theme.is-mobile ? 96px : 145px; text: @tr("Ключ КП (опц.):"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.kp-api-key; input-type: InputType.password; placeholder-text: @tr("API-ключ Kinopoisk (опц.)"); }
         }
 
         if (root.engine-update-status != "" || root.engine-updating) : VerticalLayout {
@@ -163,11 +167,16 @@ export component TorrServerSettingsSection inherits VerticalLayout {
 
         HorizontalLayout {
             spacing: 6px;
-            FluentButton { text: @tr("Сохранить"); primary: true; clicked => { root.save-ts-connection-settings(); } }
-            FluentButton { text: @tr("Рестарт"); clicked => { root.restart-ts-engine(); } }
-            FluentButton { text: root.engine-updating ? "..." : @tr("Обновить MatriX"); enabled: !root.engine-updating; clicked => { root.download-update-engine(); } }
-            FluentButton { text: ".exe..."; enabled: !root.engine-updating; clicked => { root.pick-engine-exe(); } }
-            FluentButton { text: @tr("Веб-панель"); clicked => { root.open-web-panel(); } }
+            FluentButton { compact: !Win11Theme.is-desktop; text: @tr("Сохранить"); primary: true; clicked => { root.save-ts-connection-settings(); } }
+            FluentButton { compact: !Win11Theme.is-desktop; text: @tr("Рестарт"); clicked => { root.restart-ts-engine(); } }
+            FluentButton { compact: !Win11Theme.is-desktop; text: @tr("Веб-панель"); clicked => { root.open-web-panel(); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            FluentButton { compact: true; text: root.engine-updating ? "..." : @tr("Обновить MatriX"); enabled: !root.engine-updating; clicked => { root.download-update-engine(); } }
+            FluentButton { compact: true; text: ".exe..."; enabled: !root.engine-updating; clicked => { root.pick-engine-exe(); } }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 
@@ -180,18 +189,25 @@ export component TorrServerSettingsSection inherits VerticalLayout {
             spacing: 8px;
             VerticalLayout { horizontal-stretch: 1; spacing: 3px; Text { text: @tr("Кеш (МБ)"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; } LineEdit { text <=> root.ts-cache-size-mb; } }
             VerticalLayout { horizontal-stretch: 1; spacing: 3px; Text { text: @tr("Предзагрузка %"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; } LineEdit { text <=> root.ts-preload-percent; } }
+        }
+        HorizontalLayout {
+            spacing: 8px;
             VerticalLayout { horizontal-stretch: 1; spacing: 3px; Text { text: @tr("Read-ahead %"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; } LineEdit { text <=> root.ts-read-ahead-percent; } }
             VerticalLayout { horizontal-stretch: 1; spacing: 3px; Text { text: @tr("Соединения"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; } LineEdit { text <=> root.ts-connections-limit; } }
         }
         HorizontalLayout {
             spacing: 12px;
-            Switch { text: @tr("Кеш на диск"); checked <=> root.ts-use-disk; }
-            Switch { text: "IPv6"; checked <=> root.ts-enable-ipv6; }
-            Switch { text: "DLNA"; checked <=> root.ts-enable-dlna; }
-            Switch { text: "RuTor"; checked <=> root.ts-enable-rutor; }
+            Switch { horizontal-stretch: 1; text: @tr("Кеш на диск"); checked <=> root.ts-use-disk; }
+            Switch { horizontal-stretch: 1; text: "IPv6"; checked <=> root.ts-enable-ipv6; }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Switch { horizontal-stretch: 1; text: "DLNA"; checked <=> root.ts-enable-dlna; }
+            Switch { horizontal-stretch: 1; text: "RuTor"; checked <=> root.ts-enable-rutor; }
         }
         HorizontalLayout {
             FluentButton { text: @tr("Применить параметры кеша"); primary: true; clicked => { root.save-ts-cache-settings(); } }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 

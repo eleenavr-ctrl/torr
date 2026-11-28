@@ -179,24 +179,27 @@ export component TorrentsView inherits Rectangle {
             }
         }
 
-        // Filter Pills with Counters + Sort / Backup actions
+        // Filter Pills with Counters
         HorizontalLayout {
+            spacing: 5px;
+            FilterPill { text: @tr("Все"); count: AppState.count-all; active: AppState.filter-mode == 0; clicked => { AppState.filter-mode = 0; root.set-torrents-filter(0); } }
+            FilterPill { text: @tr("Активные"); count: AppState.count-active; active: AppState.filter-mode == 1; clicked => { AppState.filter-mode = 1; root.set-torrents-filter(1); } }
+            if (!Win11Theme.is-mobile) : FilterPill { text: @tr("4K / HDR"); count: AppState.count-4k; active: AppState.filter-mode == 2; clicked => { AppState.filter-mode = 2; root.set-torrents-filter(2); } }
+            if (!Win11Theme.is-mobile) : FilterPill { text: @tr("Сериалы"); count: AppState.count-series; active: AppState.filter-mode == 3; clicked => { AppState.filter-mode = 3; root.set-torrents-filter(3); } }
+            FilterPill { text: @tr("Завершённые"); count: AppState.count-completed; active: AppState.filter-mode == 4; clicked => { AppState.filter-mode = 4; root.set-torrents-filter(4); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        // Sort + Backup toolbar row
+        if (!Win11Theme.is-mobile) : HorizontalLayout {
             spacing: 6px;
-            HorizontalLayout {
-                horizontal-stretch: 1;
-                spacing: 5px;
-                FilterPill { text: @tr("Все"); count: AppState.count-all; active: AppState.filter-mode == 0; clicked => { AppState.filter-mode = 0; root.set-torrents-filter(0); } }
-                FilterPill { text: @tr("Активные"); count: AppState.count-active; active: AppState.filter-mode == 1; clicked => { AppState.filter-mode = 1; root.set-torrents-filter(1); } }
-                if (!Win11Theme.is-mobile) : FilterPill { text: @tr("4K / HDR"); count: AppState.count-4k; active: AppState.filter-mode == 2; clicked => { AppState.filter-mode = 2; root.set-torrents-filter(2); } }
-                if (!Win11Theme.is-mobile) : FilterPill { text: @tr("Сериалы"); count: AppState.count-series; active: AppState.filter-mode == 3; clicked => { AppState.filter-mode = 3; root.set-torrents-filter(3); } }
-                FilterPill { text: @tr("Завершённые"); count: AppState.count-completed; active: AppState.filter-mode == 4; clicked => { AppState.filter-mode = 4; root.set-torrents-filter(4); } }
-            }
-            if (!Win11Theme.is-mobile) : ComboBox {
-                width: 148px;
+            ComboBox {
+                width: 156px;
                 model: [@tr("Новые сверху"), @tr("Старые сверху"), @tr("По названию"), @tr("По размеру"), @tr("По скорости")];
                 current-index <=> root.torrents-sort-mode;
                 selected => { root.set-torrents-sort(self.current-index); }
             }
+            Rectangle { horizontal-stretch: 1; }
             if (Win11Theme.is-desktop) : FluentButton { compact: true; text: @tr("Экспорт"); clicked => { root.export-torrents(); } }
             if (Win11Theme.is-desktop) : FluentButton { compact: true; text: @tr("Импорт"); clicked => { root.import-torrents(); } }
         }
@@ -262,6 +265,7 @@ export component TorrentsView inherits Rectangle {
 
             if (root.torrents.length == 0) : VerticalLayout {
                 alignment: center;
+                padding: 24px;
                 spacing: 6px;
                 Text {
                     text: @tr("Список раздач пуст");
