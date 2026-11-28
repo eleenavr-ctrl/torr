@@ -135,10 +135,11 @@ export component FluentNavItem inherits Rectangle {
             color: Win11Theme.text-primary;
             overflow: elide;
         }
-        if (!root.compact-rail && root.can-detach && (ta.has-hover || d-ta.has-hover)) : Rectangle {
+        if (!root.compact-rail && root.can-detach) : Rectangle {
             width: 22px;
             height: 22px;
             border-radius: 4px;
+            opacity: (ta.has-hover || d-ta.has-hover) ? 1.0 : 0.0;
             background: d-ta.has-hover ? Win11Theme.card-hover : transparent;
             d-ta := TouchArea {
                 mouse-cursor: pointer;
