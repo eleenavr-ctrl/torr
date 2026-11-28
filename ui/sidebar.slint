@@ -1,0 +1,101 @@
+import { Win11Theme } from "theme.slint";
+import { AppState } from "globals.slint";
+import { FluentCard, FluentButton, FluentNavItem, ThemeSelector } from "components.slint";
+
+export component DesktopSidebar inherits Rectangle {
+    in property <image> app-icon;
+    in-out property <int> active-tab: 0;
+    in-out property <int> theme-mode: 0;
+    in property <bool> ts-has-lan-ip: false;
+    in property <string> ts-lan-url: "";
+    in property <string> ts-browser-url: "";
+
+    callback detach-module(int);
+    callback copy-ts-lan-url();
+    callback refresh-ts-addresses();
+    callback change-theme-mode(int);
+
+    width: Win11Theme.sidebar-w;
+    background: Win11Theme.sidebar-bg;
+
+    VerticalLayout {
+        padding: Win11Theme.is-desktop ? 10px : 6px;
+        spacing: 4px;
+
+        if (Win11Theme.is-desktop) : HorizontalLayout {
+            padding: 6px;
+            spacing: 8px;
+            Image { width: 22px; height: 22px; source: root.app-icon; }
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "TorrServerUI";
+                    font-family: Win11Theme.font-ui;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Win11Theme.text-primary;
+                }
+                Text {
+                    text: AppState.telemetry-cpu + " • " + AppState.telemetry-ram + " • " + AppState.telemetry-dht;
+                    font-family: Win11Theme.font-mono;
+                    font-size: 9px;
+                    color: Win11Theme.text-secondary;
+                    overflow: elide;
+                }
+            }
+        }
+
+        FluentNavItem {
+            label: @tr("Раздачи"); compact-rail: Win11Theme.is-tablet; can-detach: true; active: root.active-tab == 0;
+            icon-path: "M 7 4 L 7 20 M 7 4 L 3 8 M 7 4 L 11 8 M 17 20 L 17 4 M 17 20 L 13 16 M 17 20 L 21 16";
+            clicked => { root.active-tab = 0; }
+            detach-clicked => { root.detach-module(0); }
+        }
+        FluentNavItem {
+            label: @tr("Поиск"); compact-rail: Win11Theme.is-tablet; can-detach: true; active: root.active-tab == 1;
+            icon-path: "M 11 4 A 7 7 0 1 0 11 18 A 7 7 0 1 0 11 4 M 16 16 L 21 21";
+            clicked => { root.active-tab = 1; }
+            detach-clicked => { root.detach-module(1); }
+        }
+        FluentNavItem {
+            label: @tr("История"); compact-rail: Win11Theme.is-tablet; can-detach: true; active: root.active-tab == 2;
+            icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 12 7 L 12 12 L 15.5 14";
+            clicked => { root.active-tab = 2; }
+            detach-clicked => { root.detach-module(2); }
+        }
+        FluentNavItem {
+            label: @tr("Конструктор"); compact-rail: Win11Theme.is-tablet; can-detach: true; active: root.active-tab == 4;
+            icon-path: "M 3 3 L 10 3 L 10 10 L 3 10 Z M 14 3 L 21 3 L 21 10 L 14 10 Z M 3 14 L 10 14 L 10 21 L 3 21 Z M 14 14 L 21 14 L 21 21 L 14 21 Z";
+            clicked => { root.active-tab = 4; }
+            detach-clicked => { root.detach-module(4); }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        if (Win11Theme.is-desktop) : FluentCard {
+            VerticalLayout {
+                padding: 8px;
+                spacing: 4px;
+                Text { text: "LAMPA LAN"; font-family: Win11Theme.font-ui; font-size: 9px; font-weight: 600; color: Win11Theme.text-secondary; }
+                Text { text: root.ts-has-lan-ip ? root.ts-lan-url : root.ts-browser-url; font-family: Win11Theme.font-mono; font-size: 10px; color: Win11Theme.text-primary; overflow: elide; }
+                HorizontalLayout {
+                    spacing: 4px;
+                    FluentButton { horizontal-stretch: 1; compact: true; text: @tr("Копия"); clicked => { root.copy-ts-lan-url(); } }
+                    FluentButton { compact: true; icon-path: "M 20 11 A 8 8 0 1 0 18 17 M 20 4 L 20 11 L 13 11"; clicked => { root.refresh-ts-addresses(); } }
+                }
+            }
+        }
+
+        ThemeSelector {
+            compact: Win11Theme.is-tablet;
+            mode <=> root.theme-mode;
+            changed(m) => { root.change-theme-mode(m); }
+        }
+        Rectangle { height: 1px; background: Win11Theme.border-color; }
+        FluentNavItem {
+            label: @tr("Настройки"); compact-rail: Win11Theme.is-tablet; active: root.active-tab == 3;
+            icon-path: "M 12 9 A 3 3 0 1 0 12 15 A 3 3 0 1 0 12 9 M 10.5 2 L 13.5 2 L 14.2 4.4 L 16.0 5.2 L 18.2 3.8 L 20.2 5.8 L 18.8 8.0 L 19.6 9.8 L 22 10.5 L 22 13.5 L 19.6 14.2 L 18.8 16.0 L 20.2 18.2 L 18.2 20.2 L 16.0 18.8 L 14.2 19.6 L 13.5 22 L 10.5 22 L 9.8 19.6 L 8.0 18.8 L 5.8 20.2 L 3.8 18.2 L 5.2 16.0 L 4.4 14.2 L 2 13.5 L 2 10.5 L 4.4 9.8 L 5.2 8.0 L 3.8 5.8 L 5.8 3.8 L 8.0 5.2 L 9.8 4.4 Z";
+            clicked => { root.active-tab = 3; }
+        }
+    }
+}

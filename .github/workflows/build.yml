@@ -24,29 +24,70 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Build release binary
+      - name: Cargo check (Windows x64)
+        run: cargo check --target x86_64-pc-windows-msvc
+
+      - name: Run unit tests
+        run: cargo test --target x86_64-pc-windows-msvc
+
+      - name: Format check (advisory)
+        continue-on-error: true
+        run: cargo fmt --check
+
+      - name: Clippy check (advisory)
+        continue-on-error: true
+        run: cargo clippy --target x86_64-pc-windows-msvc
+
+      - name: Security audit (advisory)
+        continue-on-error: true
+        run: cargo audit
+
+      - name: Build release binary (crt-static)
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
         run: cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Prepare dist/TorrServerUI.exe
+      - name: Package portable artifacts and SHA256SUMS
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item -Path "target/x86_64-pc-windows-msvc/release/torrserver-ui.exe" -Destination "dist/TorrServerUI.exe" -Force
+          Compress-Archive -Path "dist/TorrServerUI.exe" -DestinationPath "dist/TorrServerUI-Windows-x64-Portable.zip" -Force
+          $exeHash = (Get-FileHash -Path "dist/TorrServerUI.exe" -Algorithm SHA256).Hash.ToLower()
+          $zipHash = (Get-FileHash -Path "dist/TorrServerUI-Windows-x64-Portable.zip" -Algorithm SHA256).Hash.ToLower()
+          @(
+            "$exeHash  TorrServerUI.exe",
+            "$zipHash  TorrServerUI-Windows-x64-Portable.zip"
+          ) | Set-Content -Path "dist/SHA256SUMS.txt" -Encoding utf8
 
-      - name: Upload build artifact
+      - name: Upload portable build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TorrServerUI-windows-x64
-          path: dist/TorrServerUI.exe
+          path: |
+            dist/TorrServerUI.exe
+            dist/TorrServerUI-Windows-x64-Portable.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Upload generated Cargo.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cargo.lock
+          path: Cargo.lock
           if-no-files-found: error
 
       - name: Publish GitHub Release on tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/TorrServerUI.exe
+          files: |
+            dist/TorrServerUI.exe
+            dist/TorrServerUI-Windows-x64-Portable.zip
+            dist/SHA256SUMS.txt
           generate_release_notes: true

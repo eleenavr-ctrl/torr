@@ -1,0 +1,93 @@
+import { Win11Theme } from "theme.slint";
+import { AppState } from "globals.slint";
+import { MediaBadge } from "components.slint";
+
+export component StatusBar inherits Rectangle {
+    in property <bool> healthy: false;
+    in property <string> status-text: "Инициализация...";
+    in property <string> status-version: "";
+    in property <string> status-speed: "0 KB/s";
+    in property <int> active-count: 0;
+    in property <string> app-version: "0.2.0";
+
+    callback open-diagnostics();
+
+    height: 26px;
+    background: Win11Theme.card-bg;
+    border-width: 1px;
+    border-color: Win11Theme.border-color;
+
+    sb-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.open-diagnostics(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 5px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: root.healthy ? Win11Theme.status-ok : Win11Theme.status-err;
+                }
+            }
+            Text {
+                text: root.status-text;
+                font-family: Win11Theme.font-ui;
+                font-size: 11px;
+                color: Win11Theme.text-primary;
+                vertical-alignment: center;
+            }
+        }
+
+        if (!Win11Theme.is-mobile && root.status-version != "") : Text {
+            text: root.status-version;
+            font-family: Win11Theme.font-ui;
+            font-size: 11px;
+            color: Win11Theme.text-secondary;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.status-speed + " • " + root.active-count;
+            font-family: Win11Theme.font-mono;
+            font-size: 10px;
+            color: Win11Theme.text-secondary;
+            vertical-alignment: center;
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        if (!Win11Theme.is-mobile) : Text {
+            text: AppState.sync-status-text;
+            font-family: Win11Theme.font-ui;
+            font-size: 10px;
+            color: Win11Theme.text-secondary;
+            vertical-alignment: center;
+        }
+
+        if (!Win11Theme.is-mobile) : VerticalLayout {
+            alignment: center;
+            MediaBadge {
+                text: AppState.data-read-only ? "Portable (RO)" : "Portable (UserData/)";
+                badge-bg: AppState.data-read-only ? Win11Theme.danger-bg : Win11Theme.badge-bg;
+                text-color: AppState.data-read-only ? Win11Theme.status-err : Win11Theme.text-secondary;
+            }
+        }
+
+        Text {
+            text: "v" + root.app-version;
+            font-family: Win11Theme.font-mono;
+            font-size: 10px;
+            color: sb-ta.has-hover ? Win11Theme.accent : Win11Theme.text-secondary;
+            vertical-alignment: center;
+        }
+    }
+}

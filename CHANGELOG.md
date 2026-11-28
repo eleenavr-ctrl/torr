@@ -1,52 +1,19 @@
-# CHANGELOG.md — История изменений
+# Changelog — TorrServerUI
 
-Все значимые изменения проекта документируются в этом файле.
-
-## [Unreleased]
-- Исправлены ошибки сборки под `x86_64-pc-windows-msvc`: включены фичи `raw-window-handle-06` для `slint` и `Win32_Security` для `windows-sys`, добавлен импорт `slint::ComponentHandle` в `src/core/mod.rs`.
-- `diagnostics.rs`, `torrents_view.slint` и `mod.rs`: если сторонний/уже запущенный TorrServer отвечает на порту `8090`, отсутствие `data/torrserver/TorrServer-windows-amd64.exe` не считается ошибкой; если на порту запущен несовместимый `TorrServer Silo` (`/echo` → `HTTP 404`), диагностика и статус-бар выводят точную подсказку вместо ложного «занят сторонним процессом».
-- `src/modules/torrserver/api.rs`: переработан разбор ответов `/search/?query=` и JacRed на базе `serde_json::Value` (поддержка полей `Link`/`Magnet`/`Hash`, `Title`/`Name`, `null`-значений), добавлена проверка `EnableRutorSearch` и резервные зеркала JacRed (`jacred.xyz`, `jacred.stream`, `jr.maxvol.pro`).
-- `src/modules/torrserver/player.rs`: расширен автопоиск видеоплееров (`LocalAppData`, `AppData`, `Scoop`, `Chocolatey`, 64-битный K-Lite, `PotPlayer64.exe`/`PotPlayer.exe`, `KMPlayer`, `SMPlayer`, `WindowsApps` и read-only чтение `App Paths` из реестра Windows с раскрытием `%VAR%`).
-- Экспорт и импорт списка раздач в `.json` (`⬇ Экспорт .json` / `⬆ Импорт .json` на вкладке «Раздачи»): перенос раздач с сохранением `hash`, `title`, `poster` и `data` между запущенными экземплярами TorrServer в один клик; добавлена предварительная проверка доступности TorrServer (`/echo`) перед импортом.
-- `src/modules/torrserver/server_manager.rs` и UI: апдейтер теперь выбирает последний совместимый релиз **`MatriX.*`** (в обход несовместимого `Silo.3` на `releases/latest`), поддерживает потоковую загрузку в файл с индикатором прогресса (`engine-update-progress`), стадиями (`1/4`–`4/4`), процентами, текущей скоростью (`МБ/с` / `КБ/с`), 3 попытками и таймаутом 600 с, проверку сигнатуры `MZ`/`Content-Length`, логирование цепочки ошибок в `[TS:UPDATER]`, кнопку **`Указать .exe...`** (`install_local_exe`) и автоопределение CLI-режима движка.
-- Прямой поиск по **RuTracker** (`src/modules/torrserver/rutracker.rs`): авторизация логином/паролем (или cookie `bb_session` / `cf_clearance`), настраиваемый `User-Agent` (`rutracker_user_agent`), браузерные заголовки, кодировка `windows-1251`, диагностика Cloudflare HTTP 403, настройка зеркала и прокси (`http`/`socks5h`), переключатель источника в «Поиске» (`Все` / `RuTor` / `RuTracker` / `JacRed`) и автоматическая загрузка `.torrent`/magnet в TorrServer.
-- `ui/components.slint`, `ui/app.slint`, `ui/modules/torrserver/settings_section.slint`: иконки в левой боковой панели (`Раздачи`, `Поиск`, `История`, `Настройки`), заголовках секций настроек (`SettingsExpander`) и стрелки раскрытия переведены с Unicode-глифов шрифта на векторные SVG `Path` — теперь все иконки корректно отображаются на Windows 11 независимо от системных шрифтов.
-- Встроенный браузер **Edge WebView2** для RuTracker (`src/modules/torrserver/rutracker_webview.rs`, `wry 0.50` со статическим загрузчиком `WebView2LoaderStatic`): ленивый запуск в отдельном Win32 STA-потоке только при использовании RuTracker, хранение профиля/кук в портативном каталоге `./data/torrserver/webview2/`, кнопка **«🌐 Войти через браузер (WebView2)»** и переключатель в Настройках для обхода Cloudflare (включая VPN-IP) при поиске и скачивании `.torrent`/magnet.
-- **Исправлен сброс и пропадание списка раздач:** из запуска движка (`server_manager.rs`) убран флаг `--rdb` (режим «только чтение», из-за которого TorrServer MatriX не сохранял раздачи и настройки в `config.db`), добавлен параметр `save=true` в `/torrent/upload`, а также `null_default`-десериализация в `api.rs` на случай Go-значений `null` (например, `"file_stats": null`).
-- **Выбор версии движка TorrServer MatriX:** добавлена загрузка списка доступных релизов `MatriX.*` с GitHub (`YouROK/TorrServer`), выбор конкретной версии (не только последней) прямо в баннере отсутствующего движка и в Настройках, плюс повторное использование уже запущенного совместимого MatriX.
-- **Автозапуск, автоматическое сворачивание в трей и удержание в ОЗУ:** в `[Ядро]` добавлены переключатели **автоматического сворачивания в трей при старте** (`start_minimized`, также поддерживается ключ `--minimized`/`-m`) и **повышенного приоритета процесса (`ABOVE_NORMAL_PRIORITY_CLASS`)** для `TorrServerUI` и `TorrServer MatriX`, а в настройках модуля — **Watchdog** (автоперезапуск движка при выгрузке/сбое каждые ~3.4 с даже в трее) и опция **не останавливать MatriX при закрытии оболочки**.
-- **Сортировка раздач и результатов поиска + «🔥 Топ 24ч»:** на вкладке «Раздачи» добавлена сортировка (по дате добавления новые/старые, названию, размеру, скорости) с локальным кешированием времени добавления в `./data/torrserver/torrents_meta.json`; на вкладке «Поиск» — кнопка **«🔥 Топ 24ч»** (сбор популярных раздач за 24 часа из JacRed, RuTor `/top` и RuTracker `tm=1&o=10&s=2` с дедупликацией по infohash) и расширенная сортировка (по сидам, дате, размеру и названию).
-- **Расширенное контекстное меню ПКМ на раздаче (8 пунктов):** добавлены *Воспроизвести*, *Скачать плейлист торрента* (`/playlist?hash=` с локальным M3U-фолбэком), *Скопировать магнет-ссылку* (приоритет полной ссылки с трекерами из `./data/torrserver/torrents_links.json`), *Удалить с сервера*, *Обновить торрент* (`drop` + `get` + обновление карточки), *Получить информацию о торренте* (модальная карточка характеристик, рейтингов, хеша и трекера), *Страница раздачи на трекере* (сохранение URL из поиска, RuTracker и `comment` внутри `.torrent`) и *Скачать плейлист всех торрентов сервера* (`/playlistall/all.m3u` с локальным M3U-фолбэком).
-- **Правая карточка раздачи с постером, описанием и скриншотами (`src/modules/torrserver/metadata.rs`):** при выборе торрента справа подгружаются постер, русское описание, год, жанры, страна, рейтинги **Кинопоиск / IMDb** и кликабельные скриншоты с просмотром в увеличенном окне (лайтбокс). Гибридный пайплайн: TorrServer (`poster`/`data`) → страница трекера (RuTracker/RuTor) → опциональный бесплатный ключ `kinopoiskapiunofficial.tech` (в Настройках) → IMDb + Wikidata + русская Wikipedia; дисковый кеш в `./data/torrserver/posters/`.
-- **Исправлен сброс добавленных задач после закрытия и повторного открытия программы (`api.rs`, `server_manager.rs`, `storage.rs`, `mod.rs`):**
-  - В `shutdown_server()` метод `POST /shutdown` заменён на штатный для TorrServer MatriX **`GET /shutdown`** (с фолбэком на `POST`), а время ожидания корректного выхода движка увеличено до 3 с, чтобы `config.db` (`bbolt`) успевала чисто закрыться без `TerminateProcess`.
-  - В `./data/torrserver/torrents_saved.json` и `./data/torrserver/torrents/<hash>.torrent` добавлено мгновенное локальное сохранение всех добавленных раздач (magnet, `.torrent`-файлы, RuTracker, буфер обмена, импорт) с автоматической синхронизацией и восстановлением недостающих задач в TorrServer при старте (включая старт свёрнутым в трей) и после перезапуска/обновления движка.
-- **Исправлена ошибка «Не найден видеоплеер» (`DetectedPlayers: 0`) и расширен автопоиск (`player.rs`, `mod.rs`):**
-  - Добавлено сканирование веток реестра `Uninstall` (`HKLM`, `WOW6432Node`, `HKCU`), файловых ассоциаций Windows (`.mkv`/`.mp4`/`.avi`/`.m3u` `UserChoice` и `Classes`), каталогов `ProgramW6432`, `WinGet\Packages`, `LOCALAPPDATA\Programs`, поддержка Kodi / Light Alloy / GOM / Ace Player / Jellyfin Media Player, а также встроенный фолбэк на **`Windows Media Player` (`wmplayer.exe`)**.
-  - Если внешние `.exe`-плееры не найдены и пользовательский путь не задан, воспроизведение автоматически формирует `.m3u` и открывает его через системный обработчик Windows (`Media Player` UWP и др.), плюс выполняется повторное сканирование плееров при запуске потока.
-- **Улучшено получение метаданных, обход RuTracker HTTP 403 и разбор релизов (`rutracker.rs`, `metadata.rs`, `storage.rs`, `mod.rs`):**
-  - В `RuTrackerClient::fetch_topic_html` добавлен автоматический перебор резервных зеркал (`rutracker.net`, `rutracker.nl`) без обязательной авторизации для публичного просмотра тем (`viewtopic.php`) при блокировке Cloudflare (`HTTP 403`) на основном зеркале, а штатный пропуск недоступной по HTTP темы больше не засоряет отчёт `[WARN]`-ошибками.
-  - Для `.torrent`-файлов сохраняется исходное имя файла (`source_title` и извлечение ID темы `[rutracker-...]`), улучшен парсинг склеенных релизных тегов (например, `GangsterlendS01WEBDL2160p` и `Fallout.S01.UHD...`), поиск по `Wikidata` (`haswbstatement:P345=...`) и `ru.wikipedia.org` для сериалов.
-- **Классификация `stderr` движка TorrServer (`server_manager.rs`):** штатные информационные сообщения `MatriX` (`New torrent`, `Create cache for`, `save to db`, `Torrent close by timeout`) теперь записываются как `INFO` вместо `WARN`; в предупреждения и ошибки попадают только реальные сбои движка.
-- Подготовка к расширению модульной системы (поддержка внешнего каталога `./data/modules/`).
-
-## [0.1.0] — 2026-11-26
+## [0.2.0] - 2026-11-28
 ### Добавлено
-- **Ядро приложения (`src/core/`):**
-  - Двухслойная архитектура `Core` + `ModuleRegistry` с контрактом `AppModule`.
-  - Портативное хранение данных относительно `.exe` в `./data/config.json`, `./data/torrserver/`, `./data/modules/`.
-  - Светлая и тёмная темы Windows 11 (Mica-палитра), синхронизация заголовка окна через `DwmSetWindowAttribute` (`DWMWA_USE_IMMERSIVE_DARK_MODE`) и `Palette.color-scheme`.
-  - Программная генерация 32x32 RGBA-иконки приложения и системного трея без внешних файлов.
-  - Системный трей (`tray-icon` + `muda`) в выделенном Win32-потоке с меню ПКМ и сворачиванием при закрытии.
-  - Защита от повторного запуска через именованный Windows Mutex с разворачиванием существующего окна из трея.
-  - Шина диагностики в реальном времени (кольцевой буфер на 300 событий, проверка порта/бинарника/ping API, экспорт отчёта и Markdown-снимка для ИИ).
-- **Модуль №1 `torrserver` (`src/modules/torrserver/`):**
-  - Локальный скрытый запуск `TorrServer-windows-amd64.exe` (`CREATE_NO_WINDOW`), перехват `stdout`/`stderr`, штатная остановка через `/shutdown` + `kill()`.
-  - Удалённое подключение с поддержкой HTTP Basic Auth.
-  - Автообновлятор движка с GitHub Releases (`YouROK/TorrServer`) с обходом блокировки файла на Windows.
-  - Клиент TorrServer API (`/echo`, `/torrents`, `/torrent/upload`, `/settings`, `/search` + fallback на публичный API JacRed).
-  - Автопоиск видеоплееров (PotPlayer, MPV, VLC, MPC-BE/HC), ручной выбор `.exe`, генерация плейлистов `.m3u`, история просмотров `history.json` с избранным и отметкой серий.
-  - Опциональный перехват Magnet-ссылок из буфера обмена и Drag-and-Drop `.torrent`-файлов в окно.
-- **UI и CI:**
-  - Интерфейс Slint 1.9 (`fluent`) с боковой панелью `NavigationView`, вкладками *Раздачи*, *Поиск*, *История*, *Настройки* и контекстными меню `PopupWindow`.
-  - GitHub Actions workflow `.github/workflows/build.yml` для сборки `x86_64-pc-windows-msvc`.
+- **Трёхуровневый адаптивный Windows 11 Fluent UI (`Win11Theme`, `AppState`)**:
+  - Desktop (`>=1024px`, 3 панели), Tablet (`680–1024px`, компактный rail `56px` + выездная контекстная панель), Mobile (`<680px`, нижний TabBar + свайп-меню).
+  - 3 режима темы: Адаптивная системная, Светлая Mica (`#F3F3F3`/`#FFFFFF`), Тёмная Mica (`#202020`/`#2B2B2B`) + DWM тёмная рамка окна.
+  - Сверхплотный список раздач (`DenseTorrentRow`, 2 строки, 3px прогресс-бар, теги качества/трекера, фильтры со счётчиками) и строка живой телеметрии.
+  - Панель деталей (`TorrentDetailPanel`) с 4 вкладками (*Обзор + Трейлер*, *Файлы + Кодеки*, *Кадры + Lightbox*, *Пиры + График скорости*), а в Настройках — `DiagnosticsPanel`.
+  - Конструктор рабочего пространства (`WorkspaceBuilderView`) с пресетами и отсоединяемыми окнами (`DetachedWindow`).
+- **Портативное ядро и хранилище (`UserData/`)**:
+  - Автономная папка `UserData/` рядом с `.exe` (поддержка `--data-dir`, автомиграция `./data/` -> `UserData/`, безопасный read-only fallback).
+  - Атомарный `settings.json` (`schema_version`, защита от downgrade, сохранение неизвестных полей), SQLite `app_data.db` (`WAL`, `VACUUM INTO` бэкапы в `Backups/`), ротация логов в `Logs/` и `crash.log`.
+  - Безопасное хранение секретов (`FileSecretStore`: Windows DPAPI и Argon2+ChaCha20Poly1305) и синхронизация WebDAV (Яндекс/Mail.ru/свой сервер).
+  - Двойной автозапуск (ярлык Startup или `HKCU\...\Run` с `--minimized` и автопочинкой пути), Single Instance через Named Mutex + `interprocess`, встроенный профилировщик процесса, `ru`/`en` переводы и лицензия **Slint Royalty-Free («Made with Slint»)**.
+
+## [0.1.0] - 2026-11-27
+### Добавлено
+- Базовый портативный клиент и лаунчер TorrServer MatriX на Rust + Slint с поддержкой RuTor / RuTracker (HTTP + WebView2), видеоплееров, Lampa LAN-адресов и диагностики.

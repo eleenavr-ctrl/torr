@@ -1,0 +1,136 @@
+import { Win11Theme } from "theme.slint";
+import { FluentButton, MediaBadge } from "components.slint";
+
+export component DenseTorrentRow inherits Rectangle {
+    in property <string> title;
+    in property <string> quality-tag;
+    in property <string> tracker-tag;
+    in property <string> down-speed;
+    in property <string> up-speed;
+    in property <string> size-text;
+    in property <string> peers-text;
+    in property <string> cache-text;
+    in property <string> status-text;
+    in property <float> progress: 0.0;
+    in property <bool> is-active: false;
+    in property <bool> selected: false;
+
+    callback row-clicked();
+    callback row-double-clicked();
+    callback row-context(length, length);
+    callback play-clicked();
+    callback playlist-clicked();
+    callback magnet-clicked();
+    callback remove-clicked();
+    callback more-clicked(length, length);
+
+    height: Win11Theme.row-h;
+    border-radius: Win11Theme.radius-ctrl;
+    border-width: 1px;
+    border-color: root.selected ? Win11Theme.accent : Win11Theme.border-color;
+    background: root.selected ? Win11Theme.card-selected : (row-ta.has-hover ? Win11Theme.card-hover : Win11Theme.card-bg);
+
+    row-ta := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                root.row-context(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+        clicked => { root.row-clicked(); }
+        double-clicked => { root.row-double-clicked(); }
+    }
+
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        spacing: 4px;
+
+        // Line 1: indicator, title, quality/tracker tags, speeds, inline actions
+        HorizontalLayout {
+            spacing: 6px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: root.is-active ? Win11Theme.status-ok : Win11Theme.text-secondary;
+                }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.title;
+                font-family: Win11Theme.font-ui;
+                font-size: 12px;
+                font-weight: 600;
+                color: Win11Theme.text-primary;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            if (!Win11Theme.is-mobile && (root.quality-tag != "" || root.tracker-tag != "")) : MediaBadge {
+                text: root.quality-tag != "" && root.tracker-tag != ""
+                    ? (root.quality-tag + " • " + root.tracker-tag)
+                    : (root.quality-tag != "" ? root.quality-tag : root.tracker-tag);
+                badge-bg: Win11Theme.info-bg;
+                text-color: Win11Theme.accent;
+            }
+            Text {
+                text: "↓ " + root.down-speed + (Win11Theme.is-desktop ? ("  ↑ " + root.up-speed) : "");
+                font-family: Win11Theme.font-mono;
+                font-size: 11px;
+                color: root.is-active ? Win11Theme.accent : Win11Theme.text-secondary;
+                vertical-alignment: center;
+            }
+            if (!Win11Theme.is-mobile) : HorizontalLayout {
+                spacing: 3px;
+                FluentButton { compact: true; primary: true; icon-path: "M 7 5 L 19 12 L 7 19 Z"; clicked => { root.play-clicked(); } }
+                FluentButton { compact: true; icon-path: "M 4 6 L 16 6 M 4 12 L 16 12 M 4 18 L 12 18 M 17 15 L 21 17.5 L 17 20 Z"; clicked => { root.playlist-clicked(); } }
+                FluentButton { compact: true; icon-path: "M 10 14 L 14 10 M 7 17 A 4 4 0 0 1 7 11 L 9 9 M 17 7 A 4 4 0 0 1 17 13 L 15 15"; clicked => { root.magnet-clicked(); } }
+                FluentButton { compact: true; danger: true; icon-path: "M 4 6 L 20 6 M 9 6 L 9 4 L 15 4 L 15 6 M 7 6 L 8 20 L 16 20 L 17 6"; clicked => { root.remove-clicked(); } }
+            }
+            if (Win11Theme.is-mobile) : HorizontalLayout {
+                spacing: 4px;
+                FluentButton { compact: true; primary: true; icon-path: "M 7 5 L 19 12 L 7 19 Z"; clicked => { root.play-clicked(); } }
+                more-btn := FluentButton {
+                    compact: true;
+                    icon-path: "M 6 12 A 1 1 0 1 0 6 12.1 M 12 12 A 1 1 0 1 0 12 12.1 M 18 12 A 1 1 0 1 0 18 12.1";
+                    clicked => { root.more-clicked(more-btn.absolute-position.x, more-btn.absolute-position.y + more-btn.height); }
+                }
+            }
+        }
+
+        // Line 2: 3px progress bar + micro-telemetry
+        HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout {
+                alignment: center;
+                width: Win11Theme.is-mobile ? 64px : 96px;
+                Rectangle {
+                    height: 3px;
+                    border-radius: 1.5px;
+                    background: Win11Theme.border-color;
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        height: 3px;
+                        border-radius: 1.5px;
+                        width: parent.width * clamp(root.progress, 0.0, 1.0);
+                        background: Win11Theme.accent;
+                    }
+                }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.size-text + " • " + root.peers-text + (root.cache-text != "" ? (" • " + root.cache-text) : "") + " • " + root.status-text;
+                font-family: Win11Theme.font-ui;
+                font-size: 10px;
+                color: Win11Theme.text-secondary;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

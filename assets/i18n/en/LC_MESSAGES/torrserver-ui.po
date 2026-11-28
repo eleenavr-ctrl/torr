@@ -1,0 +1,73 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+
+msgid "Раздачи"
+msgstr "Torrents"
+
+msgid "Поиск"
+msgstr "Search"
+
+msgid "История"
+msgstr "History"
+
+msgid "Настройки"
+msgstr "Settings"
+
+msgid "Конструктор"
+msgstr "Workspace"
+
+msgid "Все"
+msgstr "All"
+
+msgid "Активные"
+msgstr "Active"
+
+msgid "4K / HDR"
+msgstr "4K / HDR"
+
+msgid "Сериалы"
+msgstr "Series"
+
+msgid "Завершённые"
+msgstr "Completed"
+
+msgid "Обзор"
+msgstr "Overview"
+
+msgid "Файлы"
+msgstr "Files"
+
+msgid "Кадры"
+msgstr "Frames"
+
+msgid "Пиры"
+msgstr "Peers"
+
+msgid "Трейлер"
+msgstr "Trailer"
+
+msgid "Смотреть"
+msgstr "Watch"
+
+msgid "Светлая"
+msgstr "Light"
+
+msgid "Тёмная"
+msgstr "Dark"
+
+msgid "Система"
+msgstr "System"
+
+msgid "О программе"
+msgstr "About"
+
+msgid "Проверить"
+msgstr "Check"
+
+msgid "Скопировать отчёт"
+msgstr "Copy Report"
+
+msgid "Скопировать для ИИ"
+msgstr "Copy for AI"

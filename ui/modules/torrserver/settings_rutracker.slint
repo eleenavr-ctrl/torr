@@ -1,0 +1,82 @@
+import { LineEdit, Switch } from "std-widgets.slint";
+import { Win11Theme } from "../../theme.slint";
+import { FluentButton, SettingsExpander } from "../../components.slint";
+
+export component RuTrackerSettingsExpander inherits Rectangle {
+    in-out property <bool> rt-enabled: false;
+    in-out property <bool> rt-use-webview: false;
+    in-out property <string> rt-mirror: "https://rutracker.org";
+    in-out property <string> rt-username: "";
+    in-out property <string> rt-password: "";
+    in-out property <string> rt-proxy: "";
+    in-out property <string> rt-cookie: "";
+    in-out property <string> rt-user-agent: "";
+    in property <string> rt-auth-status: "";
+    in property <bool> rt-testing: false;
+
+    callback save-and-test-rutracker();
+    callback open-rutracker-webview();
+
+    SettingsExpander {
+        title: @tr("[Модуль TorrServer] RuTracker и WebView2");
+        subtitle: (root.rt-enabled ? @tr("Вкл") : @tr("Выкл")) + " • " + root.rt-mirror + (root.rt-use-webview ? " • WebView2" : "");
+        icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 3 12 L 21 12";
+
+        Switch {
+            text: @tr("Использовать RuTracker в поиске и загрузке метаданных");
+            checked <=> root.rt-enabled;
+        }
+        Switch {
+            text: @tr("Встроенный браузер WebView2 (обход Cloudflare без ручного копирования cookie)");
+            checked <=> root.rt-use-webview;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 130px; text: @tr("Зеркало:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.rt-mirror; placeholder-text: "https://rutracker.org"; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 130px; text: @tr("Логин / Пароль:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.rt-username; placeholder-text: @tr("Логин"); }
+            LineEdit { horizontal-stretch: 1; text <=> root.rt-password; input-type: InputType.password; placeholder-text: @tr("Пароль"); }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 130px; text: @tr("Прокси (опц.):"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.rt-proxy; placeholder-text: "socks5h://127.0.0.1:1080"; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 130px; text: @tr("Cookie (опц.):"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.rt-cookie; placeholder-text: "bb_session=...; cf_clearance=..."; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 130px; text: "User-Agent:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.rt-user-agent; placeholder-text: @tr("Оставьте пустым для стандартного UA"); }
+        }
+        if (root.rt-auth-status != "") : Text {
+            text: root.rt-auth-status;
+            font-family: Win11Theme.font-ui;
+            font-size: 11px;
+            color: Win11Theme.accent;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            FluentButton {
+                text: root.rt-testing ? "..." : @tr("Сохранить и проверить");
+                primary: true;
+                enabled: !root.rt-testing;
+                clicked => { root.save-and-test-rutracker(); }
+            }
+            FluentButton {
+                text: @tr("Войти через WebView2");
+                icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 3 12 L 21 12";
+                clicked => { root.open-rutracker-webview(); }
+            }
+        }
+    }
+}

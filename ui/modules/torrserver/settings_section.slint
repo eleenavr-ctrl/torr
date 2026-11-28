@@ -1,9 +1,10 @@
 import { ComboBox, LineEdit, Switch } from "std-widgets.slint";
-import { Theme } from "../../theme.slint";
+import { Win11Theme } from "../../theme.slint";
 import { FluentButton, SettingsExpander } from "../../components.slint";
+import { RuTrackerSettingsExpander } from "settings_rutracker.slint";
 
 export component TorrServerSettingsSection inherits VerticalLayout {
-    spacing: 10px;
+    spacing: 8px;
 
     // 1. Server & connection
     in-out property <int> ts-mode: 0;
@@ -21,6 +22,9 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     in-out property <bool> engine-watchdog: true;
     in-out property <bool> keep-engine-on-exit: false;
     in-out property <string> kp-api-key: "";
+    in-out property <string> ts-browser-url: "http://127.0.0.1:8090";
+    in-out property <string> ts-lan-url: "";
+    in-out property <bool> ts-has-lan-ip: false;
 
     // 2. Cache & network
     in-out property <string> ts-cache-size-mb: "64";
@@ -40,7 +44,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     in-out property <bool> clipboard-watch: false;
     in-out property <string> player-detect-status: "";
 
-    // 4. RuTracker Auth & Mirror
+    // 4. RuTracker
     in-out property <bool> rt-enabled: false;
     in-out property <bool> rt-use-webview: false;
     in-out property <string> rt-mirror: "https://rutracker.org";
@@ -59,6 +63,9 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     callback download-update-engine();
     callback pick-engine-exe();
     callback open-web-panel();
+    callback copy-ts-browser-url();
+    callback copy-ts-lan-url();
+    callback refresh-ts-addresses();
     callback save-ts-cache-settings();
     callback detect-players();
     callback pick-player-exe();
@@ -66,487 +73,168 @@ export component TorrServerSettingsSection inherits VerticalLayout {
     callback save-and-test-rutracker();
     callback open-rutracker-webview();
 
-    // Accordion 1: Server & Connection
     SettingsExpander {
-        title: "[Модуль TorrServer] Сервер и подключение";
-        subtitle: "Локальный или удалённый режим, порт, авторизация и обновление движка";
+        title: @tr("[Модуль TorrServer] Сервер и подключение");
+        subtitle: (root.ts-mode == 0 ? ("127.0.0.1:" + root.ts-port + " • " + root.ts-engine-version-text) : root.ts-remote-url);
         icon-path: "M 5 6 A 7 2.5 0 1 0 19 6 A 7 2.5 0 1 0 5 6 M 5 6 L 5 18 A 7 2.5 0 0 0 19 18 L 19 6 M 5 12 A 7 2.5 0 0 0 19 12";
         expanded: true;
 
         HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "Режим работы:";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            ComboBox {
-                horizontal-stretch: 1;
-                model: ["Локальный движок (data/torrserver)", "Удалённый сервер (URL)"];
-                current-index <=> root.ts-mode;
-            }
+            spacing: 8px;
+            Text { width: 145px; text: @tr("Режим работы:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            ComboBox { horizontal-stretch: 1; model: [@tr("Локальный движок"), @tr("Удалённый сервер")]; current-index <=> root.ts-mode; }
         }
 
         if (root.ts-mode == 0) : VerticalLayout {
             spacing: 8px;
-
             HorizontalLayout {
-                spacing: 12px;
-                Text {
-                    width: 180px;
-                    text: "Локальный TCP-порт:";
-                    font-family: Theme.font-ui;
-                    font-size: 13px;
-                    color: Theme.text-primary;
-                    vertical-alignment: center;
-                }
-                LineEdit {
-                    width: 120px;
-                    text <=> root.ts-port;
-                    placeholder-text: "8090";
-                }
-                Text {
-                    text: "Текущий движок: " + root.ts-engine-version-text;
-                    font-family: Theme.font-ui;
-                    font-size: 12px;
-                    color: Theme.text-secondary;
-                    vertical-alignment: center;
-                }
+                spacing: 8px;
+                Text { width: 145px; text: @tr("Порт / Версия:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+                LineEdit { width: 92px; text <=> root.ts-port; placeholder-text: "8090"; }
+                ComboBox { horizontal-stretch: 1; model: root.engine-version-presets; current-index <=> root.engine-version-selected-idx; selected => { root.select-engine-version(self.current-index); } }
+                FluentButton { compact: true; enabled: !root.engine-versions-loading && !root.engine-updating; icon-path: "M 20 11 A 8 8 0 1 0 18 17 M 20 4 L 20 11 L 13 11"; clicked => { root.refresh-engine-versions(); } }
             }
-
-            HorizontalLayout {
-                spacing: 12px;
-                Text {
-                    width: 180px;
-                    text: "Версия MatriX для установки:";
-                    font-family: Theme.font-ui;
-                    font-size: 13px;
-                    color: Theme.text-primary;
-                    vertical-alignment: center;
-                }
-                ComboBox {
-                    horizontal-stretch: 1;
-                    model: root.engine-version-presets;
-                    current-index <=> root.engine-version-selected-idx;
-                    selected => { root.select-engine-version(self.current-index); }
-                }
-                FluentButton {
-                    text: root.engine-versions-loading ? "..." : "↻";
-                    compact: true;
-                    enabled: !root.engine-versions-loading && !root.engine-updating;
-                    clicked => { root.refresh-engine-versions(); }
-                }
-            }
-
-            Switch {
-                text: "Автоперезапуск TorrServer MatriX при выгрузке или сбое (Watchdog)";
-                checked <=> root.engine-watchdog;
-            }
-
-            Switch {
-                text: "Оставлять фоновый процесс TorrServer MatriX в памяти после выхода из программы";
-                checked <=> root.keep-engine-on-exit;
-            }
+            Switch { text: @tr("Watchdog: автоперезапуск движка при выгрузке/сбое"); checked <=> root.engine-watchdog; }
+            Switch { text: @tr("Оставлять процесс TorrServer MatriX в памяти при выходе"); checked <=> root.keep-engine-on-exit; }
         }
 
         if (root.ts-mode == 1) : HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "URL удалённого сервера:";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.ts-remote-url;
-                placeholder-text: "http://192.168.1.10:8090";
+            spacing: 8px;
+            Text { width: 145px; text: @tr("URL сервера:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.ts-remote-url; placeholder-text: "http://192.168.1.10:8090"; }
+        }
+
+        // Browser & Lampa LAN addresses informational block
+        Rectangle {
+            border-radius: Win11Theme.radius-ctrl;
+            background: Win11Theme.subtle-bg;
+            border-width: 1px;
+            border-color: Win11Theme.border-color;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                HorizontalLayout {
+                    Text { horizontal-stretch: 1; text: @tr("Адреса для браузера и Lampa (справка)"); font-family: Win11Theme.font-ui; font-size: 12px; font-weight: 600; color: Win11Theme.text-primary; vertical-alignment: center; }
+                    FluentButton { compact: true; icon-path: "M 20 11 A 8 8 0 1 0 18 17 M 20 4 L 20 11 L 13 11"; clicked => { root.refresh-ts-addresses(); } }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { width: 135px; text: @tr("Браузер (ПК):"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; vertical-alignment: center; }
+                    Rectangle {
+                        horizontal-stretch: 1; height: 28px; border-radius: Win11Theme.radius-ctrl; background: Win11Theme.input-bg; border-width: 1px; border-color: Win11Theme.border-color; clip: true;
+                        HorizontalLayout { padding-left: 8px; padding-right: 8px; TextInput { text: root.ts-browser-url; read-only: true; single-line: true; font-family: Win11Theme.font-mono; font-size: 11px; color: Win11Theme.text-primary; vertical-alignment: center; } }
+                    }
+                    FluentButton { compact: true; text: @tr("Копия"); clicked => { root.copy-ts-browser-url(); } }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { width: 135px; text: @tr("Для Lampa (LAN):"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; vertical-alignment: center; }
+                    Rectangle {
+                        horizontal-stretch: 1; height: 28px; border-radius: Win11Theme.radius-ctrl; background: Win11Theme.input-bg; border-width: 1px; border-color: root.ts-has-lan-ip ? Win11Theme.border-color : Win11Theme.status-warn; clip: true;
+                        HorizontalLayout { padding-left: 8px; padding-right: 8px; TextInput { text: root.ts-lan-url; read-only: true; single-line: true; font-family: Win11Theme.font-mono; font-size: 11px; color: root.ts-has-lan-ip ? Win11Theme.accent : Win11Theme.text-secondary; vertical-alignment: center; } }
+                    }
+                    FluentButton { compact: true; text: @tr("Копия"); enabled: root.ts-has-lan-ip; clicked => { root.copy-ts-lan-url(); } }
+                }
+                Text {
+                    text: root.ts-mode == 0
+                        ? ("Lampa (ТВ/телефон): в Основную ссылку вводите " + (root.ts-has-lan-ip ? root.ts-lan-url : ("http://<IP_ПК>:" + root.ts-port)) + ", Дополнительная — для резервного сервера.")
+                        : ("Lampa: укажите " + root.ts-browser-url + " в Основной ссылке.");
+                    font-family: Win11Theme.font-ui; font-size: 10px; color: Win11Theme.text-secondary; wrap: word-wrap;
+                }
             }
         }
 
         HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "HTTP Basic Auth:";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.ts-username;
-                placeholder-text: "Логин (опционально)";
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.ts-password;
-                input-type: InputType.password;
-                placeholder-text: "Пароль (опционально)";
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "API-ключ Кинопоиска (опц.):";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.kp-api-key;
-                input-type: InputType.password;
-                placeholder-text: "kinopoiskapiunofficial.tech (без ключа работает IMDb + Wikipedia)";
-            }
+            spacing: 8px;
+            Text { width: 145px; text: "Basic Auth / КП API:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.ts-username; placeholder-text: @tr("Логин"); }
+            LineEdit { horizontal-stretch: 1; text <=> root.ts-password; input-type: InputType.password; placeholder-text: @tr("Пароль"); }
+            LineEdit { horizontal-stretch: 1; text <=> root.kp-api-key; input-type: InputType.password; placeholder-text: @tr("Ключ КП (опц.)"); }
         }
 
         if (root.engine-update-status != "" || root.engine-updating) : VerticalLayout {
-            spacing: 6px;
-            Text {
-                text: root.engine-update-status;
-                font-family: Theme.font-ui;
-                font-size: 12px;
-                color: Theme.accent;
-                wrap: word-wrap;
-            }
+            spacing: 4px;
+            Text { text: root.engine-update-status; font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.accent; wrap: word-wrap; }
             if (root.engine-updating) : Rectangle {
-                height: 6px;
-                border-radius: 3px;
-                background: Theme.border-color;
-                Rectangle {
-                    x: 0px;
-                    y: 0px;
-                    height: 6px;
-                    border-radius: 3px;
-                    width: parent.width * clamp(root.engine-update-progress, 0.0, 1.0);
-                    background: Theme.accent;
-                }
+                height: 4px; border-radius: 2px; background: Win11Theme.border-color;
+                Rectangle { x: 0px; y: 0px; height: 4px; border-radius: 2px; width: parent.width * clamp(root.engine-update-progress, 0.0, 1.0); background: Win11Theme.accent; }
             }
         }
 
         HorizontalLayout {
-            spacing: 8px;
-            FluentButton {
-                text: "Сохранить и применить";
-                primary: true;
-                clicked => { root.save-ts-connection-settings(); }
-            }
-            FluentButton {
-                text: "↻  Перезапустить движок";
-                clicked => { root.restart-ts-engine(); }
-            }
-            FluentButton {
-                text: root.engine-updating ? "Обновление..." : "⬇  Обновить с GitHub";
-                enabled: !root.engine-updating;
-                clicked => { root.download-update-engine(); }
-            }
-            FluentButton {
-                text: "Указать .exe...";
-                enabled: !root.engine-updating;
-                clicked => { root.pick-engine-exe(); }
-            }
-            FluentButton {
-                text: "🌐  Веб-панель";
-                clicked => { root.open-web-panel(); }
-            }
+            spacing: 6px;
+            FluentButton { text: @tr("Сохранить"); primary: true; clicked => { root.save-ts-connection-settings(); } }
+            FluentButton { text: @tr("Рестарт"); clicked => { root.restart-ts-engine(); } }
+            FluentButton { text: root.engine-updating ? "..." : @tr("Обновить MatriX"); enabled: !root.engine-updating; clicked => { root.download-update-engine(); } }
+            FluentButton { text: ".exe..."; enabled: !root.engine-updating; clicked => { root.pick-engine-exe(); } }
+            FluentButton { text: @tr("Веб-панель"); clicked => { root.open-web-panel(); } }
         }
     }
 
-    // Accordion 2: Cache & Network
     SettingsExpander {
-        title: "[Модуль TorrServer] Параметры кеша и сети";
-        subtitle: "Размер буфера ОЗУ/диска, предзагрузка, лимит соединений, DLNA и RuTor";
+        title: @tr("[Модуль TorrServer] Кеш и сеть");
+        subtitle: root.ts-cache-size-mb + " МБ • Preload " + root.ts-preload-percent + "% • Conn " + root.ts-connections-limit;
         icon-path: "M 4 8 L 20 8 M 16 4 L 20 8 L 16 12 M 20 16 L 4 16 M 8 12 L 4 16 L 8 20";
 
         HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout { horizontal-stretch: 1; spacing: 3px; Text { text: @tr("Кеш (МБ)"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; } LineEdit { text <=> root.ts-cache-size-mb; } }
+            VerticalLayout { horizontal-stretch: 1; spacing: 3px; Text { text: @tr("Предзагрузка %"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; } LineEdit { text <=> root.ts-preload-percent; } }
+            VerticalLayout { horizontal-stretch: 1; spacing: 3px; Text { text: @tr("Read-ahead %"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; } LineEdit { text <=> root.ts-read-ahead-percent; } }
+            VerticalLayout { horizontal-stretch: 1; spacing: 3px; Text { text: @tr("Соединения"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; } LineEdit { text <=> root.ts-connections-limit; } }
+        }
+        HorizontalLayout {
             spacing: 12px;
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 4px;
-                Text { text: "Размер кеша (МБ)"; font-family: Theme.font-ui; font-size: 12px; color: Theme.text-secondary; }
-                LineEdit { text <=> root.ts-cache-size-mb; }
-            }
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 4px;
-                Text { text: "Предзагрузка (%)"; font-family: Theme.font-ui; font-size: 12px; color: Theme.text-secondary; }
-                LineEdit { text <=> root.ts-preload-percent; }
-            }
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 4px;
-                Text { text: "Упреждение чтения (%)"; font-family: Theme.font-ui; font-size: 12px; color: Theme.text-secondary; }
-                LineEdit { text <=> root.ts-read-ahead-percent; }
-            }
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 4px;
-                Text { text: "Лимит соединений"; font-family: Theme.font-ui; font-size: 12px; color: Theme.text-secondary; }
-                LineEdit { text <=> root.ts-connections-limit; }
-            }
+            Switch { text: @tr("Кеш на диск"); checked <=> root.ts-use-disk; }
+            Switch { text: "IPv6"; checked <=> root.ts-enable-ipv6; }
+            Switch { text: "DLNA"; checked <=> root.ts-enable-dlna; }
+            Switch { text: "RuTor"; checked <=> root.ts-enable-rutor; }
         }
-
         HorizontalLayout {
-            spacing: 24px;
-            VerticalLayout {
-                spacing: 8px;
-                Switch {
-                    text: "Использовать диск для кеша (ts_cache)";
-                    checked <=> root.ts-use-disk;
-                }
-                Switch {
-                    text: "Включить IPv6";
-                    checked <=> root.ts-enable-ipv6;
-                }
-            }
-            VerticalLayout {
-                spacing: 8px;
-                Switch {
-                    text: "Включить DLNA-сервер";
-                    checked <=> root.ts-enable-dlna;
-                }
-                Switch {
-                    text: "Встроенный поиск RuTor";
-                    checked <=> root.ts-enable-rutor;
-                }
-            }
-        }
-
-        HorizontalLayout {
-            FluentButton {
-                text: "Применить параметры движка (/settings)";
-                primary: true;
-                clicked => { root.save-ts-cache-settings(); }
-            }
+            FluentButton { text: @tr("Применить параметры кеша"); primary: true; clicked => { root.save-ts-cache-settings(); } }
         }
     }
 
-    // Accordion 3: Players & Clipboard
     SettingsExpander {
-        title: "[Модуль TorrServer] Видеоплееры и буфер";
-        subtitle: "Автопоиск PotPlayer / MPV / VLC / MPC, путь к .exe, перехват Magnet";
+        title: @tr("[Модуль TorrServer] Плееры и буфер обмена");
+        subtitle: root.player-detect-status != "" ? root.player-detect-status : @tr("Автопоиск плееров и перехват Magnet");
         icon-path: "M 7 5 L 19 12 L 7 19 Z";
 
         HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "Обнаруженный плеер:";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            ComboBox {
-                horizontal-stretch: 1;
-                model: root.player-presets;
-                current-index <=> root.player-selected-idx;
-            }
-            FluentButton {
-                text: "Автопоиск";
-                clicked => { root.detect-players(); }
-            }
+            spacing: 8px;
+            Text { width: 135px; text: @tr("Плеер:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            ComboBox { horizontal-stretch: 1; model: root.player-presets; current-index <=> root.player-selected-idx; }
+            FluentButton { compact: true; text: @tr("Найти"); clicked => { root.detect-players(); } }
         }
-
         HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "Путь к плееру (.exe):";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.player-custom-path;
-                placeholder-text: "Оставьте пустым для использования выбранного выше плеера";
-            }
-            FluentButton {
-                text: "Обзор...";
-                clicked => { root.pick-player-exe(); }
-            }
+            spacing: 8px;
+            Text { width: 135px; text: @tr("Свой .exe:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.player-custom-path; placeholder-text: "C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe"; }
+            FluentButton { compact: true; text: @tr("Обзор..."); clicked => { root.pick-player-exe(); } }
         }
-
         HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "Доп. аргументы:";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.player-args;
-                placeholder-text: "Например: --fullscreen";
-            }
+            spacing: 8px;
+            Text { width: 135px; text: @tr("Аргументы CLI:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.player-args; placeholder-text: "--fullscreen"; }
         }
-
-        Switch {
-            text: "Автоматически перехватывать скопированные magnet:?xt=... ссылки из буфера обмена";
-            checked <=> root.clipboard-watch;
-        }
-
-        if (root.player-detect-status != "") : Text {
-            text: root.player-detect-status;
-            font-family: Theme.font-ui;
-            font-size: 12px;
-            color: Theme.text-secondary;
-            wrap: word-wrap;
-        }
-
+        Switch { text: @tr("Перехватывать magnet-ссылки из буфера обмена"); checked <=> root.clipboard-watch; }
         HorizontalLayout {
-            FluentButton {
-                text: "Сохранить настройки плеера";
-                primary: true;
-                clicked => { root.save-player-settings(); }
-            }
+            FluentButton { text: @tr("Сохранить настройки плеера"); primary: true; clicked => { root.save-player-settings(); } }
         }
     }
 
-    // Accordion 4: RuTracker Auth & Mirror
-    SettingsExpander {
-        title: "[Модуль TorrServer] Поиск и авторизация RuTracker";
-        subtitle: "Вход в ваш аккаунт RuTracker, зеркало и опциональный прокси";
-        icon-path: "M 12 3 L 4 6.5 L 4 12 C 4 16.8 7.4 20.4 12 22 C 16.6 20.4 20 16.8 20 12 L 20 6.5 Z M 9.2 12.4 L 11.2 14.4 L 15.2 10.2";
-
-        Switch {
-            text: "Включить прямой поиск по RuTracker";
-            checked <=> root.rt-enabled;
-        }
-
-        Switch {
-            text: "Встроенный браузер Edge WebView2 (обход Cloudflare и VPN-блокировок)";
-            checked <=> root.rt-use-webview;
-        }
-
-        HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "Домен / зеркало:";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.rt-mirror;
-                placeholder-text: "https://rutracker.org";
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "Аккаунт RuTracker:";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.rt-username;
-                placeholder-text: "Логин";
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.rt-password;
-                input-type: InputType.password;
-                placeholder-text: "Пароль";
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "Прокси (опционально):";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.rt-proxy;
-                placeholder-text: "Например: socks5h://127.0.0.1:1080 или http://127.0.0.1:8080";
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "Cookie bb_session:";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.rt-cookie;
-                input-type: InputType.password;
-                placeholder-text: "bb_session=... (при 403/Cloudflare: bb_session=...; cf_clearance=...)";
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 12px;
-            Text {
-                width: 180px;
-                text: "User-Agent (опционально):";
-                font-family: Theme.font-ui;
-                font-size: 13px;
-                color: Theme.text-primary;
-                vertical-alignment: center;
-            }
-            LineEdit {
-                horizontal-stretch: 1;
-                text <=> root.rt-user-agent;
-                placeholder-text: "Как в браузере (для cf_clearance: F12 -> Console -> navigator.userAgent)";
-            }
-        }
-
-        if (root.rt-auth-status != "") : Text {
-            text: root.rt-auth-status;
-            font-family: Theme.font-ui;
-            font-size: 12px;
-            color: Theme.accent;
-            wrap: word-wrap;
-        }
-
-        HorizontalLayout {
-            spacing: 8px;
-            FluentButton {
-                text: root.rt-testing ? "Проверка входа..." : "Сохранить и проверить вход";
-                primary: true;
-                enabled: !root.rt-testing;
-                clicked => { root.save-and-test-rutracker(); }
-            }
-            FluentButton {
-                text: "🌐  Войти через браузер (WebView2)";
-                enabled: !root.rt-testing;
-                clicked => { root.open-rutracker-webview(); }
-            }
-        }
+    RuTrackerSettingsExpander {
+        rt-enabled <=> root.rt-enabled;
+        rt-use-webview <=> root.rt-use-webview;
+        rt-mirror <=> root.rt-mirror;
+        rt-username <=> root.rt-username;
+        rt-password <=> root.rt-password;
+        rt-proxy <=> root.rt-proxy;
+        rt-cookie <=> root.rt-cookie;
+        rt-user-agent <=> root.rt-user-agent;
+        rt-auth-status: root.rt-auth-status;
+        rt-testing: root.rt-testing;
+        save-and-test-rutracker => { root.save-and-test-rutracker(); }
+        open-rutracker-webview => { root.open-rutracker-webview(); }
     }
 }

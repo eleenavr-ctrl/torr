@@ -1,0 +1,13 @@
+project: TorrServerUI
+version: 0.2.0
+target: x86_64-pc-windows-msvc
+license: MIT + Slint Royalty-Free ("Made with Slint")
+status: ready_for_ci_build
+ui_entry: ui/app.slint
+rust_entry: src/main.rs
+lib_entry: src/lib.rs
+notes:
+  - Build and test on Windows x64 via GitHub Actions (.github/workflows/build.yml).
+  - Portable data stored in UserData/ next to TorrServerUI.exe (or --data-dir).
+  - Automatic one-time migration from legacy ./data/ directory is supported.
+  - All new Rust and Slint modules strictly follow layered boundaries and <= 500 line target.

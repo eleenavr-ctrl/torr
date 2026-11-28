@@ -1,0 +1,104 @@
+import { Win11Theme, TorrentFileItem, ScreenshotItem } from "theme.slint";
+import { AppState } from "globals.slint";
+import { DiagnosticsPanel } from "diagnostics_panel.slint";
+import { TorrentDetailPanel } from "modules/torrserver/detail_panel.slint";
+
+export component ContextSidePanel inherits Rectangle {
+    in property <int> active-tab: 0;
+
+    // Diagnostics props
+    in property <string> diag-app-version: "";
+    in property <string> diag-engine-version: "-";
+    in property <string> diag-binary-status: "-";
+    in property <string> diag-port-status: "-";
+    in property <string> diag-api-ping: "-";
+    in property <string> diag-problem-hint: "";
+    in property <bool> diag-has-problem: false;
+
+    // Detail props
+    in property <string> torrent-hash: "";
+    in property <string> torrent-title: "";
+    in property <bool> loading: false;
+    in property <string> title: "";
+    in property <string> original-title: "";
+    in property <string> year: "";
+    in property <string> genres: "";
+    in property <string> country: "";
+    in property <string> rating-kp: "";
+    in property <string> rating-imdb: "";
+    in property <string> description: "";
+    in property <string> source-label: "";
+    in property <string> tracker-url: "";
+    in property <image> poster;
+    in property <bool> has-poster: false;
+    in property <[ScreenshotItem]> screenshots;
+    in property <[TorrentFileItem]> files;
+    in-out property <bool> only-video-files: true;
+
+    callback run-diagnostics-now();
+    callback copy-diagnostics-report();
+    callback copy-diagnostics-for-ai();
+    callback clear-diagnostics-logs();
+
+    callback close-panel();
+    callback refresh-metadata(string);
+    callback play-file(string, int);
+    callback play-all-m3u(string);
+    callback copy-stream-url(string, int);
+    callback toggle-only-video(bool);
+    callback open-external-url(string);
+    callback open-lightbox(image, string);
+    callback watch-trailer(string, string);
+
+    if (root.active-tab == 3) : DiagnosticsPanel {
+        width: parent.width;
+        height: parent.height;
+        app-version: root.diag-app-version;
+        engine-version: root.diag-engine-version;
+        binary-status: root.diag-binary-status;
+        port-status: root.diag-port-status;
+        api-ping: root.diag-api-ping;
+        problem-hint: root.diag-problem-hint;
+        has-problem: root.diag-has-problem;
+        run-diagnostics-now => { root.run-diagnostics-now(); }
+        copy-diagnostics-report => { root.copy-diagnostics-report(); }
+        copy-diagnostics-for-ai => { root.copy-diagnostics-for-ai(); }
+        clear-diagnostics-logs => { root.clear-diagnostics-logs(); }
+    }
+
+    if (root.active-tab != 3) : TorrentDetailPanel {
+        width: parent.width;
+        height: parent.height;
+        torrent-hash: root.torrent-hash;
+        torrent-title: root.torrent-title;
+        loading: root.loading;
+        title: root.title;
+        original-title: root.original-title;
+        year: root.year;
+        genres: root.genres;
+        country: root.country;
+        rating-kp: root.rating-kp;
+        rating-imdb: root.rating-imdb;
+        description: root.description;
+        source-label: root.source-label;
+        tracker-url: root.tracker-url;
+        poster: root.poster;
+        has-poster: root.has-poster;
+        screenshots: root.screenshots;
+        files: root.files;
+        only-video-files <=> root.only-video-files;
+        peers: AppState.detail-peers;
+        speed-history: AppState.detail-speed-history;
+        trailer-url: AppState.detail-trailer-url;
+
+        close-panel => { root.close-panel(); }
+        refresh-metadata(h) => { root.refresh-metadata(h); }
+        play-file(h, id) => { root.play-file(h, id); }
+        play-all-m3u(h) => { root.play-all-m3u(h); }
+        copy-stream-url(h, id) => { root.copy-stream-url(h, id); }
+        toggle-only-video(v) => { root.toggle-only-video(v); }
+        open-external-url(u) => { root.open-external-url(u); }
+        open-lightbox(img, u) => { root.open-lightbox(img, u); }
+        watch-trailer(h, t) => { root.watch-trailer(h, t); }
+    }
+}

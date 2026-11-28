@@ -1,32 +1,17 @@
-# TorrServerUI
+# TorrServerUI — Портативный клиент TorrServer MatriX (Windows 11 Fluent)
 
-Портативная модульная графическая оболочка и лаунчер для **TorrServer** под Windows 10/11 (x64) в стиле **Windows 11 Fluent Design**, написанная на **Rust + Slint UI**.
+Портативное десктопное приложение на **Rust + Slint (Fluent)** с адаптивным интерфейсом Windows 11, встроенным управлением движком TorrServer MatriX, поиском по трекерам, плеером, медиа-карточками, WebDAV-синхронизацией и поддержкой Lampa LAN.
 
-## Ключевые возможности
-- **100% портативность:** все настройки, история, кэш и бинарник движка хранятся строго рядом с `TorrServerUI.exe` в папке `./data/`. Никаких записей в реестр или `AppData` (кроме опционального ярлыка в Автозагрузке).
-- **Дизайн Windows 11:** светлая и тёмная темы в духе Mica, автоматическая перекраска заголовка окна (`DwmSetWindowAttribute`), боковая панель `NavigationView`, сворачиваемые карточки `SettingsExpander`, контекстные меню `PopupWindow`.
-- **Модульная архитектура:** ядро (`Core`) отделено от подключаемых модулей (`ModuleRegistry` + контракт `AppModule`). Первый встроенный модуль — `torrserver`.
-- **Управление движком:** скрытый локальный запуск (`CREATE_NO_WINDOW`), перехват вывода в реальном времени, удалённое подключение с HTTP Basic Auth, автообновление движка с GitHub (`YouROK/TorrServer`).
-- **Плееры и медиа:** автопоиск PotPlayer, MPV, VLC, MPC-BE/HC, прямой запуск потоков без браузера, генерация плейлистов `.m3u` для сериалов, история и отметка просмотренных серий.
-- **Поиск и удобство:** встроенный поиск RuTor + fallback на JacRed, фильтры качества (`1080p`, `4K`, `HDR`), перехват Magnet-ссылок из буфера обмена и Drag-and-Drop `.torrent`-файлов прямо в окно.
-- **Диагностика в реальном времени:** кольцевой буфер на 300 событий, проверка порта и ping API, понятные подсказки по причинам сбоев и кнопка **«Скопировать для ИИ»**.
+## Портативный режим (`UserData/`)
+Все данные (`settings.json`, `app_data.db`, `secrets.enc`, `Logs/`, `Backups/`, `Exports/`, `torrserver/`) хранятся в папке `UserData/` рядом с `TorrServerUI.exe` (переопределение через `--data-dir <путь>`). При наличии старой папки `./data/` выполняется автоматический перенос.
 
-## Структура портативной папки `./data/`
-```text
-TorrServerUI.exe
-└── data/
-    ├── config.json                     # Конфигурация ядра и модулей
-    ├── modules/                        # Каталог для опциональных внешних .exe модулей
-    └── torrserver/
-        ├── TorrServer-windows-amd64.exe # Движок (скачивается в 1 клик)
-        ├── history.json                # История открытых раздач и просмотренных серий
-        ├── ts_cache/                   # Кеш TorrServer (если включён кеш на диске)
-        └── playlists/                  # Временные .m3u плейлисты сериалов
+## Сборка (Windows x64)
+Сборка и проверка запускаются автоматически через GitHub Actions (`.github/workflows/build.yml`):
+```bash
+cargo check
+cargo test --lib
+RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-pc-windows-msvc
 ```
 
-## Сборка из исходников
-Требуется Rust toolchain для `x86_64-pc-windows-msvc` (OpenSSL не требуется — используется `rustls`):
-```powershell
-cargo build --release --target x86_64-pc-windows-msvc
-```
-Или используйте готовый workflow в `.github/workflows/build.yml` для автоматической сборки на GitHub Actions.
+## Лицензия
+Код проекта распространяется по лицензии **MIT**. Графический интерфейс использует библиотеку Slint по лицензии **Slint Royalty-Free** («Made with Slint»).

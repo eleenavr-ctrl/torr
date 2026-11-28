@@ -1,6 +1,6 @@
 import { CheckBox, ScrollView } from "std-widgets.slint";
-import { Theme, HistoryItem } from "../../theme.slint";
-import { FluentCard, FluentButton } from "../../components.slint";
+import { Win11Theme, HistoryItem } from "../../theme.slint";
+import { FluentCard, FluentButton, SvgIcon } from "../../components.slint";
 
 export component HistoryView inherits Rectangle {
     in-out property <bool> only-favorites: false;
@@ -14,34 +14,23 @@ export component HistoryView inherits Rectangle {
     background: transparent;
 
     VerticalLayout {
-        padding: 20px;
-        spacing: 12px;
+        padding: Win11Theme.is-mobile ? 8px : 12px;
+        spacing: 8px;
 
         HorizontalLayout {
             alignment: space-between;
-            VerticalLayout {
-                spacing: 2px;
-                Text {
-                    text: "История";
-                    font-family: Theme.font-ui;
-                    font-size: 22px;
-                    font-weight: 600;
-                    color: Theme.text-primary;
-                }
-                Text {
-                    text: "Недавно открытые раздачи, отметки просмотренных серий и избранное";
-                    font-family: Theme.font-ui;
-                    font-size: 12px;
-                    color: Theme.text-secondary;
-                }
+            Text {
+                text: @tr("История просмотров и избранное");
+                font-family: Win11Theme.font-ui;
+                font-size: 14px;
+                font-weight: 600;
+                color: Win11Theme.text-primary;
+                vertical-alignment: center;
             }
-            HorizontalLayout {
-                alignment: center;
-                CheckBox {
-                    text: "★ Избранное";
-                    checked <=> root.only-favorites;
-                    toggled => { root.toggle-favorites-filter(self.checked); }
-                }
+            CheckBox {
+                text: @tr("Только избранное");
+                checked <=> root.only-favorites;
+                toggled => { root.toggle-favorites-filter(self.checked); }
             }
         }
 
@@ -53,18 +42,18 @@ export component HistoryView inherits Rectangle {
                 alignment: center;
                 spacing: 6px;
                 Text {
-                    text: root.only-favorites ? "В избранном пока пусто" : "История просмотров пуста";
-                    font-family: Theme.font-ui;
-                    font-size: 15px;
+                    text: root.only-favorites ? @tr("В избранном пока пусто") : @tr("История просмотров пуста");
+                    font-family: Win11Theme.font-ui;
+                    font-size: 13px;
                     font-weight: 600;
-                    color: Theme.text-primary;
+                    color: Win11Theme.text-primary;
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: "Запустите фильм или сериал, чтобы запись сохранилась в data/torrserver/history.json";
-                    font-family: Theme.font-ui;
-                    font-size: 12px;
-                    color: Theme.text-secondary;
+                    text: @tr("Запустите видеофайл из раздачи, чтобы сохранить прогресс просмотра.");
+                    font-family: Win11Theme.font-ui;
+                    font-size: 11px;
+                    color: Win11Theme.text-secondary;
                     horizontal-alignment: center;
                 }
             }
@@ -72,70 +61,64 @@ export component HistoryView inherits Rectangle {
             if (root.items.length > 0) : sv-hist := ScrollView {
                 VerticalLayout {
                     width: sv-hist.visible-width;
-                    padding: 8px;
-                    spacing: 6px;
+                    padding: 6px;
+                    spacing: 4px;
 
                     for item in root.items : Rectangle {
-                        border-radius: Theme.radius-ctrl;
+                        border-radius: Win11Theme.radius-ctrl;
                         border-width: 1px;
-                        border-color: Theme.border-color;
-                        background: h-ta.has-hover ? Theme.card-hover : Theme.subtle-bg;
-
-                        h-ta := TouchArea {
-                            mouse-cursor: default;
-                        }
+                        border-color: Win11Theme.border-color;
+                        background: h-ta.has-hover ? Win11Theme.card-hover : Win11Theme.subtle-bg;
+                        h-ta := TouchArea { mouse-cursor: default; }
 
                         HorizontalLayout {
-                            padding: 10px;
-                            spacing: 10px;
-
-                            FluentButton {
-                                text: item.favorite ? "★" : "☆";
-                                compact: true;
-                                clicked => { root.toggle-favorite(item.hash); }
+                            padding: 8px;
+                            spacing: 8px;
+                            Rectangle {
+                                width: 28px;
+                                height: 28px;
+                                border-radius: 4px;
+                                background: item.favorite ? Win11Theme.info-bg : transparent;
+                                TouchArea { mouse-cursor: pointer; clicked => { root.toggle-favorite(item.hash); } }
+                                SvgIcon {
+                                    x: 6px; y: 6px; icon-size: 16px;
+                                    commands: "M 12 3 L 14.8 8.8 L 21 9.6 L 16.5 14 L 17.6 20.2 L 12 17.2 L 6.4 20.2 L 7.5 14 L 3 9.6 L 9.2 8.8 Z";
+                                    stroke-color: item.favorite ? Win11Theme.status-warn : Win11Theme.text-secondary;
+                                    fill-color: item.favorite ? Win11Theme.status-warn : transparent;
+                                }
                             }
-
                             VerticalLayout {
                                 horizontal-stretch: 1;
-                                spacing: 3px;
+                                spacing: 2px;
                                 Text {
                                     text: item.title;
-                                    font-family: Theme.font-ui;
-                                    font-size: 13px;
+                                    font-family: Win11Theme.font-ui;
+                                    font-size: 12px;
                                     font-weight: 600;
-                                    color: Theme.text-primary;
+                                    color: Win11Theme.text-primary;
                                     overflow: elide;
                                 }
-                                HorizontalLayout {
-                                    spacing: 14px;
-                                    Text {
-                                        text: "Открыто: " + item.last-opened;
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: Theme.text-secondary;
-                                    }
-                                    Text {
-                                        text: "Просмотрено серий: " + item.watched-count + " / " + item.total-files;
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: item.watched-count > 0 ? Theme.success : Theme.text-secondary;
-                                    }
+                                Text {
+                                    text: item.last-opened + "  •  " + item.watched-count + " / " + item.total-files;
+                                    font-family: Win11Theme.font-ui;
+                                    font-size: 10px;
+                                    color: item.watched-count > 0 ? Win11Theme.status-ok : Win11Theme.text-secondary;
                                 }
                             }
-
                             HorizontalLayout {
                                 alignment: center;
-                                spacing: 6px;
+                                spacing: 4px;
                                 FluentButton {
-                                    text: "▶ Открыть";
                                     compact: true;
                                     primary: true;
+                                    text: Win11Theme.is-mobile ? "" : @tr("Открыть");
+                                    icon-path: "M 7 5 L 19 12 L 7 19 Z";
                                     clicked => { root.play-history-item(item.hash, item.magnet); }
                                 }
                                 FluentButton {
-                                    text: "✕";
                                     compact: true;
                                     danger: true;
+                                    icon-path: "M 6 6 L 18 18 M 18 6 L 6 18";
                                     clicked => { root.remove-history-item(item.hash); }
                                 }
                             }

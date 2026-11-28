@@ -1,34 +1,57 @@
-import { Theme } from "theme.slint";
+import { Win11Theme } from "theme.slint";
+
+export component SvgIcon inherits Rectangle {
+    in property <string> commands;
+    in property <length> icon-size: 16px;
+    in property <color> stroke-color: Win11Theme.text-primary;
+    in property <color> fill-color: transparent;
+    width: root.icon-size;
+    height: root.icon-size;
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.commands;
+        fill: root.fill-color;
+        stroke: root.stroke-color;
+        stroke-width: 2px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+}
 
 export component FluentCard inherits Rectangle {
-    background: Theme.card-bg;
-    border-radius: Theme.radius-card;
+    background: Win11Theme.card-bg;
+    border-radius: Win11Theme.radius-card;
     border-width: 1px;
-    border-color: Theme.border-color;
+    border-color: Win11Theme.border-color;
 }
 
 export component FluentButton inherits Rectangle {
-    in property <string> text;
+    in property <string> text: "";
+    in property <string> icon-path: "";
     in property <bool> primary: false;
     in property <bool> danger: false;
     in property <bool> enabled: true;
     in property <bool> compact: false;
     callback clicked();
 
-    height: root.compact ? 28px : 32px;
-    min-width: root.compact ? 64px : 84px;
-    border-radius: Theme.radius-ctrl;
+    height: root.compact ? Win11Theme.btn-compact-h : Win11Theme.ctrl-h;
+    min-width: root.text == "" ? (root.compact ? 28px : 34px) : (root.compact ? 56px : 78px);
+    border-radius: Win11Theme.radius-ctrl;
     border-width: root.primary ? 0px : 1px;
-    border-color: root.danger ? Theme.danger : Theme.border-color;
+    border-color: root.danger ? Win11Theme.status-err : Win11Theme.border-color;
     background: !root.enabled
-        ? Theme.subtle-bg
+        ? Win11Theme.subtle-bg
         : root.primary
-            ? (ta.pressed ? Theme.accent-hover : (ta.has-hover ? Theme.accent-hover : Theme.accent))
+            ? (ta.pressed ? Win11Theme.accent-hover : (ta.has-hover ? Win11Theme.accent-hover : Win11Theme.accent))
             : root.danger
-                ? (ta.has-hover ? Theme.danger-bg : Theme.card-bg)
-                : (ta.pressed ? Theme.nav-active : (ta.has-hover ? Theme.card-hover : Theme.card-bg));
-
-    animate background { duration: 110ms; }
+                ? (ta.has-hover ? Win11Theme.danger-bg : Win11Theme.card-bg)
+                : (ta.pressed ? Win11Theme.nav-active : (ta.has-hover ? Win11Theme.card-hover : Win11Theme.card-bg));
+    animate background { duration: 100ms; }
 
     ta := TouchArea {
         enabled: root.enabled;
@@ -37,40 +60,42 @@ export component FluentButton inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: root.compact ? 10px : 14px;
-        padding-right: root.compact ? 10px : 14px;
+        padding-left: root.text == "" ? 6px : (root.compact ? 8px : 12px);
+        padding-right: root.text == "" ? 6px : (root.compact ? 8px : 12px);
+        spacing: 5px;
         alignment: center;
-        Text {
+        if (root.icon-path != "") : VerticalLayout {
+            alignment: center;
+            SvgIcon {
+                commands: root.icon-path;
+                icon-size: root.compact ? 13px : 15px;
+                stroke-color: !root.enabled ? Win11Theme.text-secondary : (root.primary ? Win11Theme.text-on-accent : (root.danger ? Win11Theme.status-err : Win11Theme.text-primary));
+            }
+        }
+        if (root.text != "") : Text {
             text: root.text;
-            font-family: Theme.font-ui;
-            font-size: root.compact ? 12px : 13px;
+            font-family: Win11Theme.font-ui;
+            font-size: root.compact ? 11px : 12px;
             font-weight: root.primary ? 600 : 500;
             vertical-alignment: center;
             horizontal-alignment: center;
-            color: !root.enabled
-                ? Theme.text-secondary
-                : root.primary
-                    ? Theme.accent-text
-                    : root.danger
-                        ? Theme.danger
-                        : Theme.text-primary;
+            color: !root.enabled ? Win11Theme.text-secondary : (root.primary ? Win11Theme.text-on-accent : (root.danger ? Win11Theme.status-err : Win11Theme.text-primary));
         }
     }
 }
 
 export component FluentNavItem inherits Rectangle {
     in property <string> label;
-    in property <string> icon-glyph: "";
     in property <string> icon-path: "";
     in property <bool> active: false;
+    in property <bool> compact-rail: false;
+    in property <bool> can-detach: false;
     callback clicked();
+    callback detach-clicked();
 
-    height: 36px;
-    border-radius: Theme.radius-ctrl;
-    background: root.active
-        ? Theme.nav-active
-        : (ta.has-hover ? Theme.nav-hover : transparent);
-
+    height: Win11Theme.is-mobile ? 42px : 34px;
+    border-radius: Win11Theme.radius-ctrl;
+    background: root.active ? Win11Theme.nav-active : (ta.has-hover ? Win11Theme.nav-hover : transparent);
     animate background { duration: 100ms; }
 
     ta := TouchArea {
@@ -80,78 +105,69 @@ export component FluentNavItem inherits Rectangle {
 
     HorizontalLayout {
         padding-left: 4px;
-        padding-right: 10px;
-        spacing: 10px;
-        alignment: start;
+        padding-right: root.compact-rail ? 4px : 6px;
+        spacing: root.compact-rail ? 0px : 8px;
+        alignment: root.compact-rail ? center : start;
 
-        // Windows 11 vertical accent indicator
         VerticalLayout {
             alignment: center;
             Rectangle {
                 width: 3px;
                 height: 16px;
                 border-radius: 1.5px;
-                background: Theme.accent;
+                background: Win11Theme.accent;
                 opacity: root.active ? 1.0 : 0.0;
             }
         }
-
         VerticalLayout {
             alignment: center;
-            Rectangle {
-                width: 20px;
-                height: 20px;
-                if (root.icon-path != "") : Path {
-                    x: 2px;
-                    y: 2px;
-                    width: 16px;
-                    height: 16px;
-                    viewbox-x: 0;
-                    viewbox-y: 0;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: root.icon-path;
-                    fill: transparent;
-                    stroke: root.active ? Theme.accent : Theme.text-secondary;
-                    stroke-width: 2px;
-                    stroke-line-cap: round;
-                    stroke-line-join: round;
-                }
-                if (root.icon-path == "") : Text {
-                    text: root.icon-glyph;
-                    font-family: Theme.font-ui;
-                    font-size: 14px;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
-                    color: root.active ? Theme.accent : Theme.text-secondary;
-                }
+            SvgIcon {
+                commands: root.icon-path;
+                icon-size: 16px;
+                stroke-color: root.active ? Win11Theme.accent : Win11Theme.text-secondary;
             }
         }
-
-        Text {
+        if (!root.compact-rail) : Text {
+            horizontal-stretch: 1;
             text: root.label;
-            font-family: Theme.font-ui;
-            font-size: 13px;
+            font-family: Win11Theme.font-ui;
+            font-size: 12px;
             font-weight: root.active ? 600 : 400;
             vertical-alignment: center;
-            color: Theme.text-primary;
+            color: Win11Theme.text-primary;
+            overflow: elide;
+        }
+        if (!root.compact-rail && root.can-detach && (ta.has-hover || d-ta.has-hover)) : Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 4px;
+            background: d-ta.has-hover ? Win11Theme.card-hover : transparent;
+            d-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.detach-clicked(); }
+            }
+            SvgIcon {
+                x: 5px;
+                y: 5px;
+                icon-size: 12px;
+                commands: "M 14 4 L 20 4 L 20 10 M 20 4 L 11 13 M 10 6 L 5 6 L 5 19 L 18 19 L 18 14";
+                stroke-color: Win11Theme.text-secondary;
+            }
         }
     }
 }
 
-export component FluentPill inherits Rectangle {
+export component FilterPill inherits Rectangle {
     in property <string> text;
+    in property <int> count: -1;
     in property <bool> active: false;
     callback clicked();
 
-    height: 26px;
+    height: Win11Theme.is-mobile ? 34px : 26px;
     border-radius: 13px;
     border-width: 1px;
-    border-color: root.active ? Theme.accent : Theme.border-color;
-    background: root.active
-        ? Theme.accent
-        : (ta.has-hover ? Theme.card-hover : Theme.card-bg);
-
+    border-color: root.active ? Win11Theme.accent : Win11Theme.border-color;
+    background: root.active ? Win11Theme.accent : (ta.has-hover ? Win11Theme.card-hover : Win11Theme.card-bg);
     animate background { duration: 100ms; }
 
     ta := TouchArea {
@@ -160,16 +176,127 @@ export component FluentPill inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 5px;
         alignment: center;
         Text {
             text: root.text;
-            font-family: Theme.font-ui;
-            font-size: 12px;
-            font-weight: root.active ? 600 : 400;
+            font-family: Win11Theme.font-ui;
+            font-size: 11px;
+            font-weight: root.active ? 600 : 500;
             vertical-alignment: center;
-            color: root.active ? Theme.accent-text : Theme.text-primary;
+            color: root.active ? Win11Theme.text-on-accent : Win11Theme.text-primary;
+        }
+        if (root.count >= 0) : Text {
+            text: root.count;
+            font-family: Win11Theme.font-ui;
+            font-size: 10px;
+            font-weight: 600;
+            vertical-alignment: center;
+            color: root.active ? Win11Theme.text-on-accent : Win11Theme.text-secondary;
+        }
+    }
+}
+
+export component MediaBadge inherits Rectangle {
+    in property <string> text;
+    in property <color> badge-bg: Win11Theme.badge-bg;
+    in property <color> text-color: Win11Theme.text-secondary;
+
+    height: 18px;
+    border-radius: 4px;
+    background: root.badge-bg;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        Text {
+            text: root.text;
+            font-family: Win11Theme.font-ui;
+            font-size: 10px;
+            font-weight: 600;
+            color: root.text-color;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component StatTile inherits FluentCard {
+    in property <string> label;
+    in property <string> value;
+    in property <color> value-color: Win11Theme.text-primary;
+    VerticalLayout {
+        padding: 8px;
+        spacing: 2px;
+        Text {
+            text: root.label;
+            font-family: Win11Theme.font-ui;
+            font-size: 10px;
+            color: Win11Theme.text-secondary;
+            overflow: elide;
+        }
+        Text {
+            text: root.value;
+            font-family: Win11Theme.font-ui;
+            font-size: 12px;
+            font-weight: 600;
+            color: root.value-color;
+            overflow: elide;
+        }
+    }
+}
+
+export component ThemeSelector inherits Rectangle {
+    in-out property <int> mode: 0;
+    in property <bool> compact: false;
+    callback changed(int);
+
+    height: root.compact ? 28px : 32px;
+    border-radius: Win11Theme.radius-ctrl;
+    background: Win11Theme.subtle-bg;
+    border-width: 1px;
+    border-color: Win11Theme.border-color;
+
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        for opt in [
+            { idx: 0, label: @tr("Система"), icon: "M 3 5 L 21 5 L 21 16 L 3 16 Z M 8 20 L 16 20 M 12 16 L 12 20" },
+            { idx: 1, label: @tr("Светлая"), icon: "M 12 8 A 4 4 0 1 0 12 16 A 4 4 0 1 0 12 8 M 12 2 L 12 5 M 12 19 L 12 22 M 2 12 L 5 12 M 19 12 L 22 12" },
+            { idx: 2, label: @tr("Тёмная"), icon: "M 20 14 A 8 8 0 1 1 10 4 A 6 6 0 0 0 20 14 Z" },
+        ] : Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 3px;
+            background: root.mode == opt.idx ? Win11Theme.accent : (t-ta.has-hover ? Win11Theme.card-hover : transparent);
+            t-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.mode = opt.idx;
+                    root.changed(opt.idx);
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 4px;
+                padding-left: 4px;
+                padding-right: 4px;
+                VerticalLayout {
+                    alignment: center;
+                    SvgIcon {
+                        commands: opt.icon;
+                        icon-size: 12px;
+                        stroke-color: root.mode == opt.idx ? Win11Theme.text-on-accent : Win11Theme.text-secondary;
+                    }
+                }
+                if (!root.compact) : Text {
+                    text: opt.label;
+                    font-family: Win11Theme.font-ui;
+                    font-size: 11px;
+                    font-weight: root.mode == opt.idx ? 600 : 400;
+                    color: root.mode == opt.idx ? Win11Theme.text-on-accent : Win11Theme.text-primary;
+                    vertical-alignment: center;
+                }
+            }
         }
     }
 }
@@ -177,142 +304,93 @@ export component FluentPill inherits Rectangle {
 export component SettingsExpander inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
-    in property <string> icon-glyph: "⚙";
     in property <string> icon-path: "";
     in-out property <bool> expanded: false;
 
-    border-radius: Theme.radius-card;
-    background: Theme.card-bg;
+    border-radius: Win11Theme.radius-card;
+    background: Win11Theme.card-bg;
     border-width: 1px;
-    border-color: Theme.border-color;
+    border-color: Win11Theme.border-color;
     clip: true;
 
     VerticalLayout {
         Rectangle {
-            height: 58px;
-            background: header-ta.has-hover ? Theme.card-hover : transparent;
-            animate background { duration: 100ms; }
-
+            height: 52px;
+            background: header-ta.has-hover ? Win11Theme.card-hover : transparent;
             header-ta := TouchArea {
                 mouse-cursor: pointer;
                 clicked => { root.expanded = !root.expanded; }
             }
-
             HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                spacing: 14px;
-
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 12px;
                 VerticalLayout {
                     alignment: center;
                     Rectangle {
-                        width: 32px;
-                        height: 32px;
+                        width: 30px;
+                        height: 30px;
                         border-radius: 4px;
-                        background: Theme.subtle-bg;
+                        background: Win11Theme.subtle-bg;
                         border-width: 1px;
-                        border-color: Theme.border-color;
-                        if (root.icon-path != "") : Path {
+                        border-color: Win11Theme.border-color;
+                        SvgIcon {
                             x: 7px;
                             y: 7px;
-                            width: 18px;
-                            height: 18px;
-                            viewbox-x: 0;
-                            viewbox-y: 0;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
+                            icon-size: 16px;
                             commands: root.icon-path;
-                            fill: transparent;
-                            stroke: Theme.accent;
-                            stroke-width: 2px;
-                            stroke-line-cap: round;
-                            stroke-line-join: round;
-                        }
-                        if (root.icon-path == "") : Text {
-                            text: root.icon-glyph;
-                            font-family: Theme.font-ui;
-                            font-size: 15px;
-                            color: Theme.accent;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                            stroke-color: Win11Theme.accent;
                         }
                     }
                 }
-
                 VerticalLayout {
                     alignment: center;
                     spacing: 2px;
                     horizontal-stretch: 1;
                     Text {
                         text: root.title;
-                        font-family: Theme.font-ui;
-                        font-size: 14px;
+                        font-family: Win11Theme.font-ui;
+                        font-size: 13px;
                         font-weight: 600;
-                        color: Theme.text-primary;
+                        color: Win11Theme.text-primary;
+                        overflow: elide;
                     }
                     Text {
                         text: root.subtitle;
-                        font-family: Theme.font-ui;
-                        font-size: 12px;
-                        color: Theme.text-secondary;
+                        font-family: Win11Theme.font-ui;
+                        font-size: 11px;
+                        color: Win11Theme.text-secondary;
                         overflow: elide;
                     }
                 }
-
                 VerticalLayout {
                     alignment: center;
-                    Rectangle {
-                        width: 16px;
-                        height: 16px;
-                        Path {
-                            x: 2px;
-                            y: 2px;
-                            width: 12px;
-                            height: 12px;
-                            viewbox-x: 0;
-                            viewbox-y: 0;
-                            viewbox-width: 24;
-                            viewbox-height: 24;
-                            commands: root.expanded ? "M 6 9 L 12 15 L 18 9" : "M 9 6 L 15 12 L 9 18";
-                            fill: transparent;
-                            stroke: Theme.text-secondary;
-                            stroke-width: 2px;
-                            stroke-line-cap: round;
-                            stroke-line-join: round;
-                        }
+                    SvgIcon {
+                        icon-size: 12px;
+                        commands: root.expanded ? "M 6 9 L 12 15 L 18 9" : "M 9 6 L 15 12 L 9 18";
+                        stroke-color: Win11Theme.text-secondary;
                     }
                 }
             }
         }
-
-        Rectangle {
-            height: root.expanded ? 1px : 0px;
-            background: Theme.border-color;
-            visible: root.expanded;
-        }
-
-        body-box := Rectangle {
-            clip: true;
-            height: root.expanded ? body-layout.preferred-height : 0px;
-            visible: root.expanded;
-
-            body-layout := VerticalLayout {
-                padding: 16px;
-                spacing: 12px;
-                @children
-            }
+        if (root.expanded) : Rectangle { height: 1px; background: Win11Theme.border-color; }
+        if (root.expanded) : VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+            @children
         }
     }
 }
 
 export component FluentMenuItem inherits Rectangle {
     in property <string> text;
+    in property <string> icon-path: "";
     in property <bool> danger: false;
     callback clicked();
 
-    height: 32px;
-    border-radius: Theme.radius-ctrl;
-    background: ta.has-hover ? (root.danger ? Theme.danger-bg : Theme.nav-hover) : transparent;
+    height: Win11Theme.is-mobile ? 38px : 30px;
+    border-radius: Win11Theme.radius-ctrl;
+    background: ta.has-hover ? (root.danger ? Win11Theme.danger-bg : Win11Theme.nav-hover) : transparent;
 
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -320,14 +398,24 @@ export component FluentMenuItem inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        if (root.icon-path != "") : VerticalLayout {
+            alignment: center;
+            SvgIcon {
+                icon-size: 14px;
+                commands: root.icon-path;
+                stroke-color: root.danger ? Win11Theme.status-err : Win11Theme.text-secondary;
+            }
+        }
         Text {
             text: root.text;
-            font-family: Theme.font-ui;
+            font-family: Win11Theme.font-ui;
             font-size: 12px;
             vertical-alignment: center;
-            color: root.danger ? Theme.danger : Theme.text-primary;
+            color: root.danger ? Win11Theme.status-err : Win11Theme.text-primary;
         }
     }
 }
+

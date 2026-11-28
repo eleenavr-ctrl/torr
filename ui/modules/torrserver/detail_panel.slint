@@ -1,0 +1,461 @@
+import { CheckBox, ScrollView } from "std-widgets.slint";
+import { Win11Theme, TorrentFileItem, ScreenshotItem, PeerItem, SpeedSample } from "../../theme.slint";
+import { AppState } from "../../globals.slint";
+import { FluentCard, FluentButton, FluentMenuItem, MediaBadge, SvgIcon } from "../../components.slint";
+import { DetailPeersTab } from "detail_peers.slint";
+
+export component TorrentDetailPanel inherits FluentCard {
+    in property <string> torrent-hash: "";
+    in property <string> torrent-title: "";
+    in property <bool> loading: false;
+    in property <string> title: "";
+    in property <string> original-title: "";
+    in property <string> year: "";
+    in property <string> genres: "";
+    in property <string> country: "";
+    in property <string> rating-kp: "";
+    in property <string> rating-imdb: "";
+    in property <string> description: "";
+    in property <string> source-label: "";
+    in property <string> tracker-url: "";
+    in property <image> poster;
+    in property <bool> has-poster: false;
+    in property <[ScreenshotItem]> screenshots;
+    in property <[TorrentFileItem]> files;
+    in-out property <bool> only-video-files: true;
+    in property <[PeerItem]> peers;
+    in property <[SpeedSample]> speed-history;
+    in property <string> trailer-url: "";
+
+    callback close-panel();
+    callback refresh-metadata(string);
+    callback play-file(string, int);
+    callback play-all-m3u(string);
+    callback copy-stream-url(string, int);
+    callback toggle-only-video(bool);
+    callback open-external-url(string);
+    callback open-lightbox(image, string);
+    callback watch-trailer(string, string);
+
+    property <bool> synopsis-expanded: false;
+    property <length> ctx-x: 0px;
+    property <length> ctx-y: 0px;
+    property <int> ctx-file-id: 0;
+
+    clip: true;
+
+    file-ctx-menu := PopupWindow {
+        x: root.ctx-x;
+        y: root.ctx-y;
+        width: 220px;
+        height: 76px;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        Rectangle {
+            background: Win11Theme.card-bg;
+            border-radius: Win11Theme.radius-card;
+            border-width: 1px;
+            border-color: Win11Theme.border-color;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000040;
+            VerticalLayout {
+                padding: 4px;
+                spacing: 2px;
+                FluentMenuItem {
+                    text: @tr("Воспроизвести");
+                    icon-path: "M 7 5 L 19 12 L 7 19 Z";
+                    clicked => { file-ctx-menu.close(); root.play-file(root.torrent-hash, root.ctx-file-id); }
+                }
+                FluentMenuItem {
+                    text: @tr("Копировать URL потока");
+                    icon-path: "M 10 14 L 14 10 M 7 17 A 4 4 0 0 1 7 11 L 9 9 M 17 7 A 4 4 0 0 1 17 13 L 15 15";
+                    clicked => { file-ctx-menu.close(); root.copy-stream-url(root.torrent-hash, root.ctx-file-id); }
+                }
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        // Header + Close + Refresh
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                horizontal-stretch: 1;
+                text: root.title != "" ? root.title : (root.torrent-title != "" ? root.torrent-title : @tr("Детали раздачи"));
+                font-family: Win11Theme.font-ui;
+                font-size: 13px;
+                font-weight: 600;
+                color: Win11Theme.text-primary;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            FluentButton {
+                compact: true;
+                enabled: !root.loading && root.torrent-hash != "";
+                icon-path: "M 20 11 A 8 8 0 1 0 18 17 M 20 4 L 20 11 L 13 11";
+                clicked => { root.refresh-metadata(root.torrent-hash); }
+            }
+            FluentButton {
+                compact: true;
+                icon-path: "M 6 6 L 18 18 M 18 6 L 6 18";
+                clicked => { root.close-panel(); }
+            }
+        }
+
+        // 4 compact sub-tabs: Обзор / Файлы / Кадры / Пиры
+        Rectangle {
+            height: Win11Theme.is-mobile ? 36px : 28px;
+            border-radius: Win11Theme.radius-ctrl;
+            background: Win11Theme.subtle-bg;
+            border-width: 1px;
+            border-color: Win11Theme.border-color;
+            HorizontalLayout {
+                padding: 2px;
+                spacing: 2px;
+                for t in [
+                    { id: 0, name: @tr("Обзор") },
+                    { id: 1, name: @tr("Файлы") },
+                    { id: 2, name: @tr("Кадры") },
+                    { id: 3, name: @tr("Пиры") },
+                ] : Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 3px;
+                    background: AppState.detail-tab == t.id ? Win11Theme.accent : (tt-ta.has-hover ? Win11Theme.card-hover : transparent);
+                    tt-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { AppState.detail-tab = t.id; }
+                    }
+                    Text {
+                        text: t.name;
+                        font-family: Win11Theme.font-ui;
+                        font-size: 11px;
+                        font-weight: AppState.detail-tab == t.id ? 600 : 500;
+                        color: AppState.detail-tab == t.id ? Win11Theme.text-on-accent : Win11Theme.text-primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        if (root.torrent-hash == "") : VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            spacing: 6px;
+            Text {
+                text: @tr("Выберите раздачу");
+                font-family: Win11Theme.font-ui;
+                font-size: 13px;
+                font-weight: 600;
+                color: Win11Theme.text-primary;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: @tr("Кликните по строке слева, чтобы открыть постер, трейлер, файлы, кадры и пиры.");
+                font-family: Win11Theme.font-ui;
+                font-size: 11px;
+                color: Win11Theme.text-secondary;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        // TAB 0: OVERVIEW (Poster, Ratings, Trailer Button, Description)
+        if (root.torrent-hash != "" && AppState.detail-tab == 0) : VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 8px;
+
+            sv-overview := ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    width: sv-overview.visible-width;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Rectangle {
+                            width: 96px;
+                            height: 142px;
+                            border-radius: Win11Theme.radius-ctrl;
+                            border-width: 1px;
+                            border-color: Win11Theme.border-color;
+                            background: Win11Theme.subtle-bg;
+                            clip: true;
+                            if (root.has-poster) : Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: root.poster;
+                                image-fit: cover;
+                            }
+                            if (!root.has-poster) : VerticalLayout {
+                                alignment: center;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    SvgIcon {
+                                        icon-size: 24px;
+                                        commands: "M 4 5 L 20 5 L 20 19 L 4 19 Z M 8 5 L 8 19 M 16 5 L 16 19";
+                                        stroke-color: Win11Theme.text-secondary;
+                                    }
+                                }
+                                Text {
+                                    text: root.loading ? @tr("Загрузка...") : @tr("Нет постера");
+                                    font-family: Win11Theme.font-ui;
+                                    font-size: 10px;
+                                    color: Win11Theme.text-secondary;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 4px;
+                            if (root.original-title != "") : Text {
+                                text: root.original-title;
+                                font-family: Win11Theme.font-ui;
+                                font-size: 11px;
+                                color: Win11Theme.text-secondary;
+                                wrap: word-wrap;
+                            }
+                            if (root.year != "" || root.country != "") : Text {
+                                text: root.year + (root.year != "" && root.country != "" ? " • " : "") + root.country;
+                                font-family: Win11Theme.font-ui;
+                                font-size: 11px;
+                                color: Win11Theme.text-secondary;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: 5px;
+                                if (root.rating-kp != "") : MediaBadge {
+                                    text: "КП " + root.rating-kp;
+                                    badge-bg: #FF6B0022;
+                                    text-color: #FF7A1A;
+                                }
+                                if (root.rating-imdb != "") : MediaBadge {
+                                    text: "IMDb " + root.rating-imdb;
+                                    badge-bg: #F5C51822;
+                                    text-color: Win11Theme.status-warn;
+                                }
+                            }
+                            if (root.genres != "") : MediaBadge {
+                                text: root.genres;
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                            FluentButton {
+                                text: @tr("Трейлер");
+                                primary: true;
+                                compact: true;
+                                icon-path: "M 7 5 L 19 12 L 7 19 Z";
+                                clicked => { root.watch-trailer(root.torrent-hash, root.title != "" ? root.title : root.torrent-title); }
+                            }
+                        }
+                    }
+
+                    // Collapsible synopsis
+                    Rectangle {
+                        border-radius: Win11Theme.radius-ctrl;
+                        background: Win11Theme.subtle-bg;
+                        border-width: 1px;
+                        border-color: Win11Theme.border-color;
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 4px;
+                            HorizontalLayout {
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: @tr("Описание сюжета");
+                                    font-family: Win11Theme.font-ui;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    color: Win11Theme.text-secondary;
+                                }
+                                TouchArea {
+                                    width: 72px;
+                                    height: 16px;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.synopsis-expanded = !root.synopsis-expanded; }
+                                    Text {
+                                        text: root.synopsis-expanded ? @tr("Свернуть") : @tr("Развернуть");
+                                        font-family: Win11Theme.font-ui;
+                                        font-size: 10px;
+                                        color: Win11Theme.accent;
+                                        horizontal-alignment: right;
+                                    }
+                                }
+                            }
+                            Text {
+                                text: root.description != "" ? root.description : (root.loading ? @tr("Поиск описания на Кинопоиске / IMDb / Wikipedia...") : @tr("Описание для этой раздачи не найдено."));
+                                font-family: Win11Theme.font-ui;
+                                font-size: 11px;
+                                color: Win11Theme.text-primary;
+                                wrap: word-wrap;
+                                max-height: root.synopsis-expanded ? 800px : 84px;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    if (root.tracker-url != "") : FluentButton {
+                        text: @tr("Страница раздачи на трекере");
+                        compact: true;
+                        icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 3 12 L 21 12";
+                        clicked => { root.open-external-url(root.tracker-url); }
+                    }
+                }
+            }
+
+            // Pinned launch bar at bottom
+            HorizontalLayout {
+                spacing: 6px;
+                FluentButton {
+                    horizontal-stretch: 1;
+                    text: @tr("Смотреть");
+                    primary: true;
+                    icon-path: "M 7 5 L 19 12 L 7 19 Z";
+                    clicked => { root.play-file(root.torrent-hash, -1); }
+                }
+                FluentButton {
+                    text: ".m3u";
+                    icon-path: "M 4 6 L 16 6 M 4 12 L 16 12 M 4 18 L 12 18 M 17 15 L 21 17.5 L 17 20 Z";
+                    clicked => { root.play-all-m3u(root.torrent-hash); }
+                }
+            }
+        }
+
+        // TAB 1: FILES (Dense 28px rows + codec tag + watched mark)
+        if (root.torrent-hash != "" && AppState.detail-tab == 1) : VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 6px;
+
+            HorizontalLayout {
+                spacing: 6px;
+                CheckBox {
+                    text: @tr("Только видео");
+                    checked <=> root.only-video-files;
+                    toggled => { root.toggle-only-video(self.checked); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                FluentButton {
+                    text: ".m3u";
+                    compact: true;
+                    icon-path: "M 4 6 L 16 6 M 4 12 L 16 12 M 4 18 L 12 18 M 17 15 L 21 17.5 L 17 20 Z";
+                    clicked => { root.play-all-m3u(root.torrent-hash); }
+                }
+            }
+
+            sv-files := ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    width: sv-files.visible-width;
+                    spacing: 3px;
+                    for f in root.files : Rectangle {
+                        height: Win11Theme.file-row-h;
+                        border-radius: Win11Theme.radius-ctrl;
+                        background: f-ta.has-hover ? Win11Theme.card-hover : Win11Theme.subtle-bg;
+                        border-width: 1px;
+                        border-color: Win11Theme.border-color;
+
+                        f-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            pointer-event(event) => {
+                                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                                    root.ctx-file-id = f.id;
+                                    root.ctx-x = min(self.absolute-position.x - root.absolute-position.x + self.mouse-x, max(0px, root.width - 224px));
+                                    root.ctx-y = min(self.absolute-position.y - root.absolute-position.y + self.mouse-y, max(0px, root.height - 84px));
+                                    file-ctx-menu.show();
+                                }
+                            }
+                            double-clicked => { root.play-file(root.torrent-hash, f.id); }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 6px;
+                            spacing: 6px;
+                            VerticalLayout {
+                                alignment: center;
+                                SvgIcon {
+                                    icon-size: 12px;
+                                    commands: f.is-watched ? "M 5 12 L 10 17 L 19 7" : "M 7 5 L 19 12 L 7 19 Z";
+                                    stroke-color: f.is-watched ? Win11Theme.status-ok : (f.is-video ? Win11Theme.accent : Win11Theme.text-secondary);
+                                }
+                            }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: f.name;
+                                font-family: Win11Theme.font-ui;
+                                font-size: 11px;
+                                color: f.is-watched ? Win11Theme.text-secondary : Win11Theme.text-primary;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                            if (f.codec-tag != "") : MediaBadge {
+                                text: f.codec-tag;
+                            }
+                            Text {
+                                text: f.size-text;
+                                font-family: Win11Theme.font-mono;
+                                font-size: 10px;
+                                color: Win11Theme.text-secondary;
+                                vertical-alignment: center;
+                            }
+                            FluentButton {
+                                compact: true;
+                                primary: f.is-video;
+                                icon-path: "M 7 5 L 19 12 L 7 19 Z";
+                                clicked => { root.play-file(root.torrent-hash, f.id); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // TAB 2: FRAMES / SCREENSHOTS (2-column grid + Lightbox)
+        if (root.torrent-hash != "" && AppState.detail-tab == 2) : sv-frames := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: sv-frames.visible-width;
+                spacing: 6px;
+                if (root.screenshots.length == 0) : Text {
+                    text: root.loading ? @tr("Загрузка кадров...") : @tr("Скриншоты для этой раздачи отсутствуют.");
+                    font-family: Win11Theme.font-ui;
+                    font-size: 11px;
+                    color: Win11Theme.text-secondary;
+                }
+                for pair-idx in [0, 2, 4, 6] : HorizontalLayout {
+                    spacing: 6px;
+                    if (pair-idx < root.screenshots.length) : Rectangle {
+                        horizontal-stretch: 1;
+                        height: 86px;
+                        border-radius: Win11Theme.radius-ctrl;
+                        border-width: 1px;
+                        border-color: Win11Theme.border-color;
+                        clip: true;
+                        Image { width: parent.width; height: parent.height; source: root.screenshots[pair-idx].img; image-fit: cover; }
+                        TouchArea { mouse-cursor: pointer; clicked => { root.open-lightbox(root.screenshots[pair-idx].img, root.screenshots[pair-idx].url); } }
+                    }
+                    if (pair-idx + 1 < root.screenshots.length) : Rectangle {
+                        horizontal-stretch: 1;
+                        height: 86px;
+                        border-radius: Win11Theme.radius-ctrl;
+                        border-width: 1px;
+                        border-color: Win11Theme.border-color;
+                        clip: true;
+                        Image { width: parent.width; height: parent.height; source: root.screenshots[pair-idx + 1].img; image-fit: cover; }
+                        TouchArea { mouse-cursor: pointer; clicked => { root.open-lightbox(root.screenshots[pair-idx + 1].img, root.screenshots[pair-idx + 1].url); } }
+                    }
+                }
+            }
+        }
+
+        // TAB 3: PEERS & LIVE SPEED CHART
+        if (root.torrent-hash != "" && AppState.detail-tab == 3) : DetailPeersTab {
+            peers: root.peers;
+            speed-history: root.speed-history;
+        }
+    }
+}

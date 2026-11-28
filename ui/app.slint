@@ -1,62 +1,54 @@
-import { Palette, ComboBox, ScrollView, Switch } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
 import {
-    Theme,
-    TorrentItem,
-    TorrentFileItem,
-    SearchResultItem,
-    ScreenshotItem,
-    HistoryItem,
-    LogEntry,
-    ModuleListItem
+    Win11Theme, TorrentItem, TorrentFileItem, SearchResultItem, ScreenshotItem,
+    HistoryItem, LogEntry, ModuleListItem, PeerItem, SpeedSample, WorkspaceBlockItem
 } from "theme.slint";
-import { FluentCard, FluentButton, FluentNavItem, SettingsExpander } from "components.slint";
+import { AppState } from "globals.slint";
+import { FluentButton } from "components.slint";
+import { DesktopSidebar } from "sidebar.slint";
+import { MobileHeaderBar, MobileBottomTabs, MobileNavDrawer, LightboxModal, SyncConflictModal, ToastBanner } from "overlays.slint";
+import { ContextSidePanel } from "context_panel.slint";
+import { SettingsView } from "settings_view.slint";
 import { TorrentsView } from "modules/torrserver/torrents_view.slint";
 import { SearchView } from "modules/torrserver/search_view.slint";
 import { HistoryView } from "modules/torrserver/history_view.slint";
-import { TorrServerSettingsSection } from "modules/torrserver/settings_section.slint";
+import { WorkspaceBuilderView } from "workspace_builder.slint";
+import { StatusBar } from "status_bar.slint";
+import { DetachedWindow } from "detached_window.slint";
 
 export {
-    TorrentItem,
-    TorrentFileItem,
-    SearchResultItem,
-    ScreenshotItem,
-    HistoryItem,
-    LogEntry,
-    ModuleListItem
+    Win11Theme, AppState, DetachedWindow, TorrentItem, TorrentFileItem, SearchResultItem,
+    ScreenshotItem, HistoryItem, LogEntry, ModuleListItem, PeerItem, SpeedSample, WorkspaceBlockItem
 }
 
 export component AppWindow inherits Window {
     title: "TorrServerUI";
-    min-width: 960px;
-    min-height: 640px;
-    preferred-width: 1260px;
-    preferred-height: 780px;
-    background: Theme.window-bg;
+    min-width: 360px; min-height: 540px;
+    preferred-width: 1280px; preferred-height: 780px;
+    background: Win11Theme.window-bg;
 
     in property <image> app-icon;
     icon: root.app-icon;
+    Win11Theme.viewport-width: root.width;
 
-    // Navigation
-    in-out property <int> active-tab: 0; // 0 = Раздачи, 1 = Поиск, 2 = История, 3 = Настройки
-
-    // Bottom Status Bar
+    // Navigation & Shell State
+    in-out property <int> active-tab <=> AppState.active-tab;
+    in-out property <int> detached-tab: -1;
     in-out property <bool> status-healthy: false;
     in-out property <string> status-text: "Инициализация...";
     in-out property <string> status-version: "";
     in-out property <string> status-speed: "0 KB/s";
     in-out property <int> status-active-count: 0;
-
-    // Toast
     in-out property <string> toast-message: "";
     in-out property <bool> toast-visible: false;
 
     // Torrents View
     in-out property <string> magnet-input: "";
-    in-out property <[TorrentItem]> torrents;
+    in-out property <[TorrentItem]> torrents <=> AppState.torrents;
     in-out property <int> torrents-sort-mode: 0;
     in-out property <string> selected-torrent-hash: "";
     in-out property <string> selected-torrent-title: "";
-    in-out property <[TorrentFileItem]> selected-files;
+    in-out property <[TorrentFileItem]> selected-files <=> AppState.selected-files;
     in-out property <bool> only-video-files: true;
     in-out property <bool> engine-missing: false;
     in-out property <bool> engine-updating: false;
@@ -67,7 +59,7 @@ export component AppWindow inherits Window {
     in-out property <bool> engine-versions-loading: false;
     in-out property <bool> is-remote-mode: false;
 
-    // Torrents Right Detail Panel & Info Modal
+    // Context Detail Panel & Info Modal
     in-out property <bool> detail-panel-open: true;
     in-out property <bool> detail-loading: false;
     in-out property <string> detail-title: "";
@@ -97,18 +89,23 @@ export component AppWindow inherits Window {
     in-out property <string> info-ratings: "";
     in-out property <string> info-magnet: "";
 
-    // Search View
+    // Lightbox & WebDAV Conflict Modals
+    in-out property <bool> lightbox-visible: false;
+    in-out property <image> lightbox-image;
+    in-out property <string> lightbox-url: "";
+    in-out property <bool> sync-conflict-visible: false;
+    in-out property <string> sync-conflict-info: "";
+
+    // Search & History
     in-out property <string> search-query: "";
     in-out property <string> search-quality-filter: "ALL";
     in-out property <int> search-sort-mode: 0;
     in-out property <int> search-source-mode: 0;
     in-out property <bool> search-loading: false;
     in-out property <string> search-error: "";
-    in-out property <[SearchResultItem]> search-results;
-
-    // History View
+    in-out property <[SearchResultItem]> search-results <=> AppState.search-results;
     in-out property <bool> history-only-favorites: false;
-    in-out property <[HistoryItem]> history-items;
+    in-out property <[HistoryItem]> history-items <=> AppState.history-items;
 
     // Settings: TorrServer
     in-out property <int> ts-mode: 0;
@@ -120,7 +117,9 @@ export component AppWindow inherits Window {
     in-out property <bool> engine-watchdog: true;
     in-out property <bool> keep-engine-on-exit: false;
     in-out property <string> kp-api-key: "";
-
+    in-out property <string> ts-browser-url: "http://127.0.0.1:8090";
+    in-out property <string> ts-lan-url: "";
+    in-out property <bool> ts-has-lan-ip: false;
     in-out property <string> ts-cache-size-mb: "64";
     in-out property <string> ts-preload-percent: "50";
     in-out property <string> ts-read-ahead-percent: "95";
@@ -129,14 +128,12 @@ export component AppWindow inherits Window {
     in-out property <bool> ts-enable-ipv6: false;
     in-out property <bool> ts-enable-dlna: false;
     in-out property <bool> ts-enable-rutor: true;
-
     in-out property <int> player-selected-idx: 0;
     in-out property <[string]> player-presets;
     in-out property <string> player-custom-path: "";
     in-out property <string> player-args: "";
     in-out property <bool> clipboard-watch: false;
     in-out property <string> player-detect-status: "";
-
     in-out property <bool> rt-enabled: false;
     in-out property <bool> rt-use-webview: false;
     in-out property <string> rt-mirror: "https://rutracker.org";
@@ -148,692 +145,296 @@ export component AppWindow inherits Window {
     in-out property <string> rt-auth-status: "";
     in-out property <bool> rt-testing: false;
 
-    // Settings: Core & Modules
-    in-out property <int> theme-mode: 0;
-    in-out property <bool> autostart-enabled: false;
+    // Settings: Core, WebDAV, Profiler, About & Diagnostics
+    in-out property <int> theme-mode <=> Win11Theme.theme-mode;
+    in-out property <int> autostart-mode: 0;
+    in-out property <bool> autostart-needs-repair: false;
     in-out property <bool> start-minimized: false;
+    in-out property <bool> close-to-tray: true;
     in-out property <bool> keep-in-memory: true;
-    in-out property <[ModuleListItem]> registered-modules;
-
-    // Settings: Diagnostics
+    in-out property <[ModuleListItem]> registered-modules <=> AppState.registered-modules;
+    in-out property <bool> webdav-enabled: false;
+    in-out property <int> webdav-preset: 0;
+    in-out property <string> webdav-url: "https://webdav.yandex.ru";
+    in-out property <string> webdav-user: "";
+    in-out property <string> webdav-pass: "";
+    in-out property <bool> webdav-sync-db: false;
+    in-out property <int> secret-mode: 0;
+    in-out property <string> master-password: "";
+    in-out property <bool> profiler-enabled: false;
+    in-out property <string> profiler-cpu: "0%";
+    in-out property <string> profiler-working-set: "0 МБ";
+    in-out property <string> profiler-private-bytes: "0 МБ";
+    in-out property <string> profiler-handles: "0";
+    in-out property <string> profiler-gdi-user: "0 / 0";
+    in-out property <string> profiler-crash-status: "crash.log отсутствует";
+    in-out property <string> changelog-text: "";
+    in-out property <string> update-check-status: "";
     in-out property <bool> diag-expander-open: false;
-    in-out property <string> diag-app-version: "0.1.0";
+    in-out property <string> diag-app-version: "0.2.0";
     in-out property <string> diag-engine-version: "-";
     in-out property <string> diag-binary-status: "-";
     in-out property <string> diag-port-status: "-";
     in-out property <string> diag-api-ping: "-";
     in-out property <string> diag-problem-hint: "Всё работает штатно";
     in-out property <bool> diag-has-problem: false;
-    in-out property <[LogEntry]> diag-logs;
+    in-out property <[LogEntry]> diag-logs <=> AppState.diag-logs;
 
-    // Callbacks
-    callback add-magnet(string);
-    callback paste-and-add-magnet();
-    callback pick-torrent-file();
-    callback select-torrent(string);
-    callback refresh-torrents();
-    callback set-torrents-sort(int);
-    callback drop-torrent(string);
-    callback remove-torrent(string);
-    callback copy-torrent-magnet(string);
-    callback play-file(string, int);
-    callback play-all-m3u(string);
-    callback copy-stream-url(string, int);
-    callback toggle-only-video(bool);
-    callback export-torrents();
-    callback import-torrents();
-    callback download-torrent-playlist(string);
-    callback download-all-playlist();
-    callback refresh-single-torrent(string);
-    callback show-torrent-info(string);
-    callback open-tracker-page(string);
-    callback refresh-torrent-metadata(string);
-    callback open-external-url(string);
-
-    callback search-torrents(string);
-    callback fetch-top-24h();
-    callback set-search-quality(string);
-    callback set-search-sort(int);
-    callback set-search-source(int);
-    callback add-search-result(string, string, string);
-    callback play-search-result(string, string, string);
-
-    callback toggle-history-favorites(bool);
-    callback play-history-item(string, string);
-    callback toggle-history-favorite(string);
-    callback remove-history-item(string);
-
-    callback save-ts-connection-settings();
-    callback restart-ts-engine();
-    callback select-engine-version(int);
-    callback refresh-engine-versions();
-    callback download-update-engine();
-    callback pick-engine-exe();
-    callback open-web-panel();
-    callback save-ts-cache-settings();
-    callback detect-players();
-    callback pick-player-exe();
-    callback save-player-settings();
-    callback save-and-test-rutracker();
-    callback open-rutracker-webview();
-
-    callback change-theme-mode(int);
-    callback toggle-autostart(bool);
-    callback toggle-start-minimized(bool);
-    callback toggle-keep-in-memory(bool);
-    callback run-diagnostics-now();
-    callback copy-diagnostics-report();
-    callback copy-diagnostics-for-ai();
-    callback clear-diagnostics-logs();
-    callback open-diagnostics-tab();
+    // Callbacks (TorrServer + Core + Services + Workspace)
+    callback add-magnet(string); callback paste-and-add-magnet(); callback pick-torrent-file();
+    callback select-torrent(string); callback refresh-torrents(); callback set-torrents-sort(int);
+    callback set-torrents-filter(int); callback drop-torrent(string); callback remove-torrent(string);
+    callback copy-torrent-magnet(string); callback play-file(string, int); callback play-all-m3u(string);
+    callback copy-stream-url(string, int); callback toggle-only-video(bool);
+    callback export-torrents(); callback import-torrents(); callback download-torrent-playlist(string);
+    callback download-all-playlist(); callback refresh-single-torrent(string);
+    callback show-torrent-info(string); callback open-tracker-page(string);
+    callback refresh-torrent-metadata(string); callback open-external-url(string); callback watch-trailer(string, string);
+    callback search-torrents(string); callback fetch-top-24h(); callback set-search-quality(string);
+    callback set-search-sort(int); callback set-search-source(int);
+    callback add-search-result(string, string, string); callback play-search-result(string, string, string);
+    callback toggle-history-favorites(bool); callback play-history-item(string, string);
+    callback toggle-history-favorite(string); callback remove-history-item(string);
+    callback save-ts-connection-settings(); callback restart-ts-engine(); callback select-engine-version(int);
+    callback refresh-engine-versions(); callback download-update-engine(); callback pick-engine-exe();
+    callback open-web-panel(); callback copy-ts-browser-url(); callback copy-ts-lan-url();
+    callback refresh-ts-addresses(); callback save-ts-cache-settings(); callback detect-players();
+    callback pick-player-exe(); callback save-player-settings(); callback save-and-test-rutracker(); callback open-rutracker-webview();
+    callback change-theme-mode(int); callback change-language(int); callback set-autostart-mode(int);
+    callback repair-autostart(); callback toggle-start-minimized(bool); callback toggle-close-to-tray(bool);
+    callback toggle-keep-in-memory(bool); callback save-webdav-settings(); callback test-webdav-connection();
+    callback sync-webdav-now(); callback resolve-sync-conflict(int); callback toggle-profiler(bool);
+    callback export-profiler-report(); callback check-github-updates(); callback detach-module(int);
+    callback run-diagnostics-now(); callback copy-diagnostics-report(); callback copy-diagnostics-for-ai();
+    callback clear-diagnostics-logs(); callback open-diagnostics-tab();
+    callback ws-load-preset(int); callback ws-save-preset(string); callback ws-delete-preset(int);
+    callback ws-set-block-span(string, int); callback ws-move-block(string, int);
 
     public function apply-theme(mode: int, sys-dark: bool) {
-        Theme.mode = mode;
-        Theme.system-is-dark = sys-dark;
-        if (mode == 1) {
-            Palette.color-scheme = ColorScheme.light;
-        } else if (mode == 2) {
-            Palette.color-scheme = ColorScheme.dark;
-        } else {
-            Palette.color-scheme = sys-dark ? ColorScheme.dark : ColorScheme.light;
-        }
+        Win11Theme.theme-mode = mode;
+        Win11Theme.system-is-dark = sys-dark;
+        if (mode == 1) { Palette.color-scheme = ColorScheme.light; }
+        else if (mode == 2) { Palette.color-scheme = ColorScheme.dark; }
+        else { Palette.color-scheme = sys-dark ? ColorScheme.dark : ColorScheme.light; }
     }
 
+    property <length> swipe-start-x: 0px;
+    property <length> swipe-start-y: 0px;
+    property <bool> swipe-tracking: false;
+
     VerticalLayout {
-        // Main Workspace
+        if (Win11Theme.is-mobile) : MobileHeaderBar { }
+
         HorizontalLayout {
             vertical-stretch: 1;
 
-            // Left Windows 11 NavigationView (220px)
-            Rectangle {
-                width: 220px;
-                background: Theme.window-bg;
-
-                VerticalLayout {
-                    padding: 10px;
-                    spacing: 4px;
-
-                    // App Branding Header
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        padding-top: 6px;
-                        padding-bottom: 12px;
-                        spacing: 10px;
-                        Image {
-                            width: 24px;
-                            height: 24px;
-                            source: root.app-icon;
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            Text {
-                                text: "TorrServerUI";
-                                font-family: Theme.font-ui;
-                                font-size: 14px;
-                                font-weight: 600;
-                                color: Theme.text-primary;
-                            }
-                            Text {
-                                text: "v" + root.diag-app-version + "  •  Portable";
-                                font-family: Theme.font-ui;
-                                font-size: 10px;
-                                color: Theme.text-secondary;
-                            }
-                        }
-                    }
-
-                    Text {
-                        text: "  TORRSERVER";
-                        font-family: Theme.font-ui;
-                        font-size: 10px;
-                        font-weight: 600;
-                        color: Theme.text-secondary;
-                    }
-
-                    FluentNavItem {
-                        label: "Раздачи";
-                        icon-path: "M 7 4 L 7 20 M 7 4 L 3 8 M 7 4 L 11 8 M 17 20 L 17 4 M 17 20 L 13 16 M 17 20 L 21 16";
-                        active: root.active-tab == 0;
-                        clicked => { root.active-tab = 0; }
-                    }
-                    FluentNavItem {
-                        label: "Поиск";
-                        icon-path: "M 11 4 A 7 7 0 1 0 11 18 A 7 7 0 1 0 11 4 M 15.95 15.95 L 21 21";
-                        active: root.active-tab == 1;
-                        clicked => { root.active-tab = 1; }
-                    }
-                    FluentNavItem {
-                        label: "История";
-                        icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 12 7 L 12 12 L 15.5 14";
-                        active: root.active-tab == 2;
-                        clicked => { root.active-tab = 2; }
-                    }
-
-                    Rectangle { vertical-stretch: 1; }
-
-                    Rectangle {
-                        height: 1px;
-                        background: Theme.border-color;
-                    }
-
-                    FluentNavItem {
-                        label: "Настройки";
-                        icon-path: "M 12 9 A 3 3 0 1 0 12 15 A 3 3 0 1 0 12 9 M 10.5 2 L 13.5 2 L 14.2 4.4 L 16.0 5.2 L 18.2 3.8 L 20.2 5.8 L 18.8 8.0 L 19.6 9.8 L 22 10.5 L 22 13.5 L 19.6 14.2 L 18.8 16.0 L 20.2 18.2 L 18.2 20.2 L 16.0 18.8 L 14.2 19.6 L 13.5 22 L 10.5 22 L 9.8 19.6 L 8.0 18.8 L 5.8 20.2 L 3.8 18.2 L 5.2 16.0 L 4.4 14.2 L 2 13.5 L 2 10.5 L 4.4 9.8 L 5.2 8.0 L 3.8 5.8 L 5.8 3.8 L 8.0 5.2 L 9.8 4.4 Z";
-                        active: root.active-tab == 3;
-                        clicked => { root.active-tab = 3; }
-                    }
-                }
+            if (!Win11Theme.is-mobile) : DesktopSidebar {
+                app-icon: root.app-icon; active-tab <=> root.active-tab; theme-mode <=> root.theme-mode;
+                ts-has-lan-ip: root.ts-has-lan-ip; ts-lan-url: root.ts-lan-url; ts-browser-url: root.ts-browser-url;
+                detach-module(t) => { root.detach-module(t); } copy-ts-lan-url => { root.copy-ts-lan-url(); }
+                refresh-ts-addresses => { root.refresh-ts-addresses(); } change-theme-mode(m) => { root.change-theme-mode(m); }
             }
+            if (!Win11Theme.is-mobile) : Rectangle { width: 1px; background: Win11Theme.border-color; }
 
-            // Vertical divider
+            // Central Workspace
             Rectangle {
-                width: 1px;
-                background: Theme.border-color;
-            }
+                horizontal-stretch: 1; background: Win11Theme.window-bg; clip: true;
 
-            // Content Area
-            Rectangle {
-                horizontal-stretch: 1;
-                background: Theme.window-bg;
-
-                if (root.active-tab == 0) : TorrentsView {
-                    magnet-input <=> root.magnet-input;
-                    torrents: root.torrents;
-                    torrents-sort-mode <=> root.torrents-sort-mode;
-                    selected-torrent-hash: root.selected-torrent-hash;
-                    selected-torrent-title: root.selected-torrent-title;
-                    selected-files: root.selected-files;
-                    only-video-files <=> root.only-video-files;
-                    engine-missing: root.engine-missing;
-                    engine-updating: root.engine-updating;
-                    engine-update-status: root.engine-update-status;
-                    engine-update-progress: root.engine-update-progress;
-                    engine-version-presets: root.engine-version-presets;
-                    engine-version-selected-idx <=> root.engine-version-selected-idx;
-                    engine-versions-loading: root.engine-versions-loading;
-                    is-remote-mode: root.is-remote-mode;
-                    status-healthy: root.status-healthy;
-                    detail-panel-open <=> root.detail-panel-open;
-                    detail-loading: root.detail-loading;
-                    detail-title: root.detail-title;
-                    detail-original-title: root.detail-original-title;
-                    detail-year: root.detail-year;
-                    detail-genres: root.detail-genres;
-                    detail-country: root.detail-country;
-                    detail-rating-kp: root.detail-rating-kp;
-                    detail-rating-imdb: root.detail-rating-imdb;
-                    detail-description: root.detail-description;
-                    detail-source: root.detail-source;
-                    detail-tracker-url: root.detail-tracker-url;
-                    detail-poster: root.detail-poster;
-                    detail-has-poster: root.detail-has-poster;
-                    detail-screenshots: root.detail-screenshots;
-                    torrent-info-visible <=> root.torrent-info-visible;
-                    info-hash: root.info-hash;
-                    info-title: root.info-title;
-                    info-size: root.info-size;
-                    info-added: root.info-added;
-                    info-status: root.info-status;
-                    info-speed: root.info-speed;
-                    info-peers: root.info-peers;
-                    info-files-count: root.info-files-count;
-                    info-tracker-url: root.info-tracker-url;
-                    info-ratings: root.info-ratings;
-                    info-magnet: root.info-magnet;
-
-                    add-magnet(m) => { root.add-magnet(m); }
-                    paste-and-add-magnet => { root.paste-and-add-magnet(); }
-                    pick-torrent-file => { root.pick-torrent-file(); }
-                    select-torrent(h) => { root.select-torrent(h); }
-                    refresh-torrents => { root.refresh-torrents(); }
-                    set-torrents-sort(m) => { root.set-torrents-sort(m); }
-                    drop-torrent(h) => { root.drop-torrent(h); }
-                    remove-torrent(h) => { root.remove-torrent(h); }
-                    copy-torrent-magnet(h) => { root.copy-torrent-magnet(h); }
-                    play-file(h, fid) => { root.play-file(h, fid); }
-                    play-all-m3u(h) => { root.play-all-m3u(h); }
-                    copy-stream-url(h, fid) => { root.copy-stream-url(h, fid); }
-                    toggle-only-video(v) => { root.toggle-only-video(v); }
-                    select-engine-version(idx) => { root.select-engine-version(idx); }
-                    refresh-engine-versions => { root.refresh-engine-versions(); }
-                    download-update-engine => { root.download-update-engine(); }
-                    pick-engine-exe => { root.pick-engine-exe(); }
-                    export-torrents => { root.export-torrents(); }
-                    import-torrents => { root.import-torrents(); }
-                    download-torrent-playlist(h) => { root.download-torrent-playlist(h); }
-                    download-all-playlist => { root.download-all-playlist(); }
-                    refresh-single-torrent(h) => { root.refresh-single-torrent(h); }
-                    show-torrent-info(h) => { root.show-torrent-info(h); }
-                    open-tracker-page(h) => { root.open-tracker-page(h); }
-                    refresh-torrent-metadata(h) => { root.refresh-torrent-metadata(h); }
-                    open-external-url(u) => { root.open-external-url(u); }
+                if (root.detached-tab == root.active-tab && root.detached-tab != -1) : VerticalLayout {
+                    alignment: center; spacing: 8px;
+                    Text { text: @tr("Раздел открыт в отдельном окне"); font-family: Win11Theme.font-ui; font-size: 14px; font-weight: 600; color: Win11Theme.text-primary; horizontal-alignment: center; }
+                    HorizontalLayout { alignment: center; FluentButton { primary: true; text: @tr("Вернуть сюда"); clicked => { root.detach-module(-1); } } }
                 }
 
-                if (root.active-tab == 1) : SearchView {
-                    search-query <=> root.search-query;
-                    quality-filter: root.search-quality-filter;
-                    sort-mode: root.search-sort-mode;
-                    source-mode: root.search-source-mode;
-                    loading: root.search-loading;
-                    error-text: root.search-error;
-                    results: root.search-results;
+                if (root.active-tab == 0 && root.detached-tab != 0) : TorrentsView {
+                    magnet-input <=> root.magnet-input; torrents: root.torrents; torrents-sort-mode <=> root.torrents-sort-mode;
+                    selected-torrent-hash: root.selected-torrent-hash; engine-missing: root.engine-missing;
+                    engine-updating: root.engine-updating; engine-update-status: root.engine-update-status;
+                    engine-update-progress: root.engine-update-progress; engine-version-presets: root.engine-version-presets;
+                    engine-version-selected-idx <=> root.engine-version-selected-idx; engine-versions-loading: root.engine-versions-loading;
+                    is-remote-mode: root.is-remote-mode; status-healthy: root.status-healthy;
+                    torrent-info-visible <=> root.torrent-info-visible; info-hash: root.info-hash; info-title: root.info-title;
+                    info-size: root.info-size; info-added: root.info-added; info-status: root.info-status;
+                    info-speed: root.info-speed; info-peers: root.info-peers; info-files-count: root.info-files-count;
+                    info-tracker-url: root.info-tracker-url; info-ratings: root.info-ratings; info-magnet: root.info-magnet;
+                    add-magnet(m) => { root.add-magnet(m); } paste-and-add-magnet => { root.paste-and-add-magnet(); }
+                    pick-torrent-file => { root.pick-torrent-file(); } select-torrent(h) => { root.select-torrent(h); }
+                    refresh-torrents => { root.refresh-torrents(); } set-torrents-sort(m) => { root.set-torrents-sort(m); }
+                    set-torrents-filter(f) => { root.set-torrents-filter(f); } drop-torrent(h) => { root.drop-torrent(h); }
+                    remove-torrent(h) => { root.remove-torrent(h); } copy-torrent-magnet(h) => { root.copy-torrent-magnet(h); }
+                    play-file(h, fid) => { root.play-file(h, fid); } select-engine-version(i) => { root.select-engine-version(i); }
+                    refresh-engine-versions => { root.refresh-engine-versions(); } download-update-engine => { root.download-update-engine(); }
+                    pick-engine-exe => { root.pick-engine-exe(); } export-torrents => { root.export-torrents(); }
+                    import-torrents => { root.import-torrents(); } download-torrent-playlist(h) => { root.download-torrent-playlist(h); }
+                    download-all-playlist => { root.download-all-playlist(); } refresh-single-torrent(h) => { root.refresh-single-torrent(h); }
+                    show-torrent-info(h) => { root.show-torrent-info(h); } open-tracker-page(h) => { root.open-tracker-page(h); }
+                }
 
-                    search-torrents(q) => { root.search-torrents(q); }
-                    fetch-top-24h => { root.fetch-top-24h(); }
-                    set-quality(q) => { root.set-search-quality(q); }
-                    set-sort(s) => { root.set-search-sort(s); }
+                if (root.active-tab == 1 && root.detached-tab != 1) : SearchView {
+                    search-query <=> root.search-query; quality-filter: root.search-quality-filter;
+                    sort-mode: root.search-sort-mode; source-mode: root.search-source-mode;
+                    loading: root.search-loading; error-text: root.search-error; results: root.search-results;
+                    search-torrents(q) => { root.search-torrents(q); } fetch-top-24h => { root.fetch-top-24h(); }
+                    set-quality(q) => { root.set-search-quality(q); } set-sort(s) => { root.set-search-sort(s); }
                     set-source(src) => { root.set-search-source(src); }
-                    add-search-result(m, t, u) => { root.add-search-result(m, t, u); }
-                    play-search-result(m, t, u) => { root.play-search-result(m, t, u); }
+                    add-search-result(m, t, u) => { root.add-search-result(m, t, u); } play-search-result(m, t, u) => { root.play-search-result(m, t, u); }
                 }
 
-                if (root.active-tab == 2) : HistoryView {
-                    only-favorites <=> root.history-only-favorites;
-                    items: root.history-items;
-
-                    toggle-favorites-filter(v) => { root.toggle-history-favorites(v); }
-                    play-history-item(h, m) => { root.play-history-item(h, m); }
-                    toggle-favorite(h) => { root.toggle-history-favorite(h); }
-                    remove-history-item(h) => { root.remove-history-item(h); }
+                if (root.active-tab == 2 && root.detached-tab != 2) : HistoryView {
+                    only-favorites <=> root.history-only-favorites; items: root.history-items;
+                    toggle-favorites-filter(v) => { root.toggle-history-favorites(v); } play-history-item(h, m) => { root.play-history-item(h, m); }
+                    toggle-favorite(h) => { root.toggle-history-favorite(h); } remove-history-item(h) => { root.remove-history-item(h); }
                 }
 
-                if (root.active-tab == 3) : sv-settings := ScrollView {
-                    VerticalLayout {
-                        width: sv-settings.visible-width;
-                        padding: 20px;
-                        spacing: 10px;
-
-                        VerticalLayout {
-                            spacing: 2px;
-                            padding-bottom: 6px;
-                            Text {
-                                text: "Настройки";
-                                font-family: Theme.font-ui;
-                                font-size: 22px;
-                                font-weight: 600;
-                                color: Theme.text-primary;
-                            }
-                            Text {
-                                text: "Параметры ядра оболочки, подключённых модулей и диагностика";
-                                font-family: Theme.font-ui;
-                                font-size: 12px;
-                                color: Theme.text-secondary;
-                            }
-                        }
-
-                        // Module #1 Settings (4 accordions)
-                        TorrServerSettingsSection {
-                            ts-mode <=> root.ts-mode;
-                            ts-port <=> root.ts-port;
-                            ts-remote-url <=> root.ts-remote-url;
-                            ts-username <=> root.ts-username;
-                            ts-password <=> root.ts-password;
-                            ts-engine-version-text: root.ts-engine-version-text;
-                            engine-updating: root.engine-updating;
-                            engine-update-status: root.engine-update-status;
-                            engine-update-progress: root.engine-update-progress;
-                            engine-version-presets: root.engine-version-presets;
-                            engine-version-selected-idx <=> root.engine-version-selected-idx;
-                            engine-versions-loading: root.engine-versions-loading;
-                            engine-watchdog <=> root.engine-watchdog;
-                            keep-engine-on-exit <=> root.keep-engine-on-exit;
-                            kp-api-key <=> root.kp-api-key;
-
-                            ts-cache-size-mb <=> root.ts-cache-size-mb;
-                            ts-preload-percent <=> root.ts-preload-percent;
-                            ts-read-ahead-percent <=> root.ts-read-ahead-percent;
-                            ts-connections-limit <=> root.ts-connections-limit;
-                            ts-use-disk <=> root.ts-use-disk;
-                            ts-enable-ipv6 <=> root.ts-enable-ipv6;
-                            ts-enable-dlna <=> root.ts-enable-dlna;
-                            ts-enable-rutor <=> root.ts-enable-rutor;
-
-                            player-selected-idx <=> root.player-selected-idx;
-                            player-presets: root.player-presets;
-                            player-custom-path <=> root.player-custom-path;
-                            player-args <=> root.player-args;
-                            clipboard-watch <=> root.clipboard-watch;
-                            player-detect-status: root.player-detect-status;
-
-                            rt-enabled <=> root.rt-enabled;
-                            rt-use-webview <=> root.rt-use-webview;
-                            rt-mirror <=> root.rt-mirror;
-                            rt-username <=> root.rt-username;
-                            rt-password <=> root.rt-password;
-                            rt-proxy <=> root.rt-proxy;
-                            rt-cookie <=> root.rt-cookie;
-                            rt-user-agent <=> root.rt-user-agent;
-                            rt-auth-status: root.rt-auth-status;
-                            rt-testing: root.rt-testing;
-
-                            save-ts-connection-settings => { root.save-ts-connection-settings(); }
-                            restart-ts-engine => { root.restart-ts-engine(); }
-                            select-engine-version(idx) => { root.select-engine-version(idx); }
-                            refresh-engine-versions => { root.refresh-engine-versions(); }
-                            download-update-engine => { root.download-update-engine(); }
-                            pick-engine-exe => { root.pick-engine-exe(); }
-                            open-web-panel => { root.open-web-panel(); }
-                            save-ts-cache-settings => { root.save-ts-cache-settings(); }
-                            detect-players => { root.detect-players(); }
-                            pick-player-exe => { root.pick-player-exe(); }
-                            save-player-settings => { root.save-player-settings(); }
-                            save-and-test-rutracker => { root.save-and-test-rutracker(); }
-                            open-rutracker-webview => { root.open-rutracker-webview(); }
-                        }
-
-                        // Core Settings Accordion #4
-                        SettingsExpander {
-                            title: "[Ядро] Интерфейс, автозапуск, трей и удержание в памяти";
-                            subtitle: "Тема Windows 11, автозапуск с Windows, сворачивание в трей и приоритет процесса";
-                            icon-path: "M 4 4 L 10 4 L 10 10 L 4 10 Z M 14 4 L 20 4 L 20 10 L 14 10 Z M 4 14 L 10 14 L 10 20 L 4 20 Z M 14 14 L 20 14 L 20 20 L 14 20 Z";
-                            expanded: true;
-
-                            HorizontalLayout {
-                                spacing: 12px;
-                                Text {
-                                    width: 180px;
-                                    text: "Тема оформления:";
-                                    font-family: Theme.font-ui;
-                                    font-size: 13px;
-                                    color: Theme.text-primary;
-                                    vertical-alignment: center;
-                                }
-                                ComboBox {
-                                    horizontal-stretch: 1;
-                                    model: ["Как в системе", "Светлая", "Тёмная"];
-                                    current-index <=> root.theme-mode;
-                                    selected => { root.change-theme-mode(self.current-index); }
-                                }
-                            }
-
-                            Switch {
-                                text: "Запускать TorrServerUI вместе с Windows (создаёт ярлык в папке Автозагрузки)";
-                                checked <=> root.autostart-enabled;
-                                toggled => { root.toggle-autostart(self.checked); }
-                            }
-
-                            Switch {
-                                text: "Автоматически сворачивать TorrServerUI в системный трей после запуска";
-                                checked <=> root.start-minimized;
-                                toggled => { root.toggle-start-minimized(self.checked); }
-                            }
-
-                            Switch {
-                                text: "Удерживать TorrServerUI и MatriX в памяти (повышенный приоритет Windows при нагрузке на ОЗУ)";
-                                checked <=> root.keep-in-memory;
-                                toggled => { root.toggle-keep-in-memory(self.checked); }
-                            }
-
-                            Text {
-                                text: "Зарегистрированные модули:";
-                                font-family: Theme.font-ui;
-                                font-size: 13px;
-                                font-weight: 600;
-                                color: Theme.text-primary;
-                            }
-
-                            for m in root.registered-modules : Rectangle {
-                                border-radius: Theme.radius-ctrl;
-                                border-width: 1px;
-                                border-color: Theme.border-color;
-                                background: Theme.subtle-bg;
-                                HorizontalLayout {
-                                    padding: 10px;
-                                    spacing: 10px;
-                                    VerticalLayout {
-                                        horizontal-stretch: 1;
-                                        spacing: 2px;
-                                        Text {
-                                            text: m.name + "  (id: " + m.id + ", v" + m.version + ")";
-                                            font-family: Theme.font-ui;
-                                            font-size: 12px;
-                                            font-weight: 600;
-                                            color: Theme.text-primary;
-                                        }
-                                        Text {
-                                            text: m.description;
-                                            font-family: Theme.font-ui;
-                                            font-size: 11px;
-                                            color: Theme.text-secondary;
-                                        }
-                                    }
-                                    Text {
-                                        text: m.is-external ? "Внешний (.exe)" : (m.enabled ? m.status : "Отключён");
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: Theme.accent;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Core Diagnostics Accordion #5
-                        SettingsExpander {
-                            title: "[Ядро] Версия и диагностика в реальном времени";
-                            subtitle: "Проверка порта, бинарника, ping API, журнал событий и отчёт для ИИ";
-                            icon-path: "M 3 12 L 7 12 L 9.5 5 L 14 19 L 16.5 12 L 21 12";
-                            expanded <=> root.diag-expander-open;
-
-                            // Status Summary Cards
-                            HorizontalLayout {
-                                spacing: 8px;
-                                FluentCard {
-                                    horizontal-stretch: 1;
-                                    VerticalLayout {
-                                        padding: 10px;
-                                        spacing: 2px;
-                                        Text { text: "Оболочка"; font-family: Theme.font-ui; font-size: 11px; color: Theme.text-secondary; }
-                                        Text { text: "v" + root.diag-app-version; font-family: Theme.font-ui; font-size: 13px; font-weight: 600; color: Theme.text-primary; }
-                                    }
-                                }
-                                FluentCard {
-                                    horizontal-stretch: 1;
-                                    VerticalLayout {
-                                        padding: 10px;
-                                        spacing: 2px;
-                                        Text { text: "Движок TorrServer"; font-family: Theme.font-ui; font-size: 11px; color: Theme.text-secondary; }
-                                        Text { text: root.diag-engine-version; font-family: Theme.font-ui; font-size: 13px; font-weight: 600; color: Theme.text-primary; overflow: elide; }
-                                    }
-                                }
-                                FluentCard {
-                                    horizontal-stretch: 1;
-                                    VerticalLayout {
-                                        padding: 10px;
-                                        spacing: 2px;
-                                        Text { text: "TCP-порт"; font-family: Theme.font-ui; font-size: 11px; color: Theme.text-secondary; }
-                                        Text { text: root.diag-port-status; font-family: Theme.font-ui; font-size: 12px; font-weight: 600; color: Theme.text-primary; overflow: elide; }
-                                    }
-                                }
-                                FluentCard {
-                                    horizontal-stretch: 1;
-                                    VerticalLayout {
-                                        padding: 10px;
-                                        spacing: 2px;
-                                        Text { text: "Ping API"; font-family: Theme.font-ui; font-size: 11px; color: Theme.text-secondary; }
-                                        Text { text: root.diag-api-ping; font-family: Theme.font-ui; font-size: 13px; font-weight: 600; color: Theme.text-primary; }
-                                    }
-                                }
-                            }
-
-                            Text {
-                                text: "Файл движка: " + root.diag-binary-status;
-                                font-family: Theme.font-ui;
-                                font-size: 12px;
-                                color: Theme.text-secondary;
-                            }
-
-                            // Problem / Healthy Hint Banner
-                            Rectangle {
-                                border-radius: Theme.radius-ctrl;
-                                background: root.diag-has-problem ? Theme.danger-bg : Theme.info-bg;
-                                border-width: 1px;
-                                border-color: root.diag-has-problem ? Theme.danger : Theme.accent;
-                                HorizontalLayout {
-                                    padding: 10px;
-                                    Text {
-                                        text: root.diag-problem-hint;
-                                        font-family: Theme.font-ui;
-                                        font-size: 12px;
-                                        font-weight: 600;
-                                        color: root.diag-has-problem ? Theme.danger : Theme.text-primary;
-                                        wrap: word-wrap;
-                                    }
-                                }
-                            }
-
-                            // Action Buttons
-                            HorizontalLayout {
-                                spacing: 8px;
-                                FluentButton {
-                                    text: "Проверить сейчас";
-                                    primary: true;
-                                    clicked => { root.run-diagnostics-now(); }
-                                }
-                                FluentButton {
-                                    text: "Скопировать отчёт";
-                                    clicked => { root.copy-diagnostics-report(); }
-                                }
-                                FluentButton {
-                                    text: "Скопировать для ИИ";
-                                    clicked => { root.copy-diagnostics-for-ai(); }
-                                }
-                                FluentButton {
-                                    text: "Очистить лог";
-                                    clicked => { root.clear-diagnostics-logs(); }
-                                }
-                            }
-
-                            // Live Console Log
-                            Rectangle {
-                                height: 220px;
-                                border-radius: Theme.radius-ctrl;
-                                background: Theme.log-bg;
-                                border-width: 1px;
-                                border-color: Theme.border-color;
-                                clip: true;
-
-                                sv-logs := ScrollView {
-                                    VerticalLayout {
-                                        width: sv-logs.visible-width;
-                                        padding: 8px;
-                                        spacing: 2px;
-
-                                        for entry in root.diag-logs : Text {
-                                            text: "[" + entry.timestamp + "] [" + entry.level + "] " + entry.tag + " " + entry.message;
-                                            font-family: Theme.font-mono;
-                                            font-size: 11px;
-                                            wrap: word-wrap;
-                                            color: entry.level == "ERROR"
-                                                ? Theme.danger
-                                                : (entry.level == "WARN" ? Theme.warning : Theme.text-primary);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                if (root.active-tab == 4 && root.detached-tab != 4) : WorkspaceBuilderView {
+                    load-preset(i) => { root.ws-load-preset(i); } save-preset(n) => { root.ws-save-preset(n); }
+                    delete-preset(i) => { root.ws-delete-preset(i); } set-block-span(id, s) => { root.ws-set-block-span(id, s); }
+                    move-block(id, d) => { root.ws-move-block(id, d); }
                 }
 
-                // Toast Notification
-                if (root.toast-visible) : Rectangle {
-                    x: (parent.width - self.width) / 2;
-                    y: parent.height - 54px;
-                    width: 420px;
-                    height: 36px;
-                    border-radius: Theme.radius-card;
-                    background: Theme.card-bg;
-                    border-width: 1px;
-                    border-color: Theme.accent;
-                    drop-shadow-blur: 10px;
-                    drop-shadow-color: #00000033;
-
-                    Text {
-                        text: root.toast-message;
-                        font-family: Theme.font-ui;
-                        font-size: 12px;
-                        font-weight: 500;
-                        color: Theme.text-primary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
+                if (root.active-tab == 3) : SettingsView {
+                    ts-mode <=> root.ts-mode; ts-port <=> root.ts-port; ts-remote-url <=> root.ts-remote-url;
+                    ts-username <=> root.ts-username; ts-password <=> root.ts-password; ts-engine-version-text: root.ts-engine-version-text;
+                    engine-updating: root.engine-updating; engine-update-status: root.engine-update-status; engine-update-progress: root.engine-update-progress;
+                    engine-version-presets: root.engine-version-presets; engine-version-selected-idx <=> root.engine-version-selected-idx;
+                    engine-versions-loading: root.engine-versions-loading; engine-watchdog <=> root.engine-watchdog;
+                    keep-engine-on-exit <=> root.keep-engine-on-exit; kp-api-key <=> root.kp-api-key;
+                    ts-browser-url: root.ts-browser-url; ts-lan-url: root.ts-lan-url; ts-has-lan-ip: root.ts-has-lan-ip;
+                    ts-cache-size-mb <=> root.ts-cache-size-mb; ts-preload-percent <=> root.ts-preload-percent;
+                    ts-read-ahead-percent <=> root.ts-read-ahead-percent; ts-connections-limit <=> root.ts-connections-limit;
+                    ts-use-disk <=> root.ts-use-disk; ts-enable-ipv6 <=> root.ts-enable-ipv6;
+                    ts-enable-dlna <=> root.ts-enable-dlna; ts-enable-rutor <=> root.ts-enable-rutor;
+                    player-selected-idx <=> root.player-selected-idx; player-presets: root.player-presets;
+                    player-custom-path <=> root.player-custom-path; player-args <=> root.player-args;
+                    clipboard-watch <=> root.clipboard-watch; player-detect-status: root.player-detect-status;
+                    rt-enabled <=> root.rt-enabled; rt-use-webview <=> root.rt-use-webview; rt-mirror <=> root.rt-mirror;
+                    rt-username <=> root.rt-username; rt-password <=> root.rt-password; rt-proxy <=> root.rt-proxy;
+                    rt-cookie <=> root.rt-cookie; rt-user-agent <=> root.rt-user-agent; rt-auth-status: root.rt-auth-status; rt-testing: root.rt-testing;
+                    theme-mode <=> root.theme-mode; autostart-mode <=> root.autostart-mode; autostart-needs-repair: root.autostart-needs-repair;
+                    start-minimized <=> root.start-minimized; close-to-tray <=> root.close-to-tray; keep-in-memory <=> root.keep-in-memory;
+                    registered-modules: root.registered-modules; webdav-enabled <=> root.webdav-enabled; webdav-preset <=> root.webdav-preset;
+                    webdav-url <=> root.webdav-url; webdav-user <=> root.webdav-user; webdav-pass <=> root.webdav-pass;
+                    webdav-sync-db <=> root.webdav-sync-db; secret-mode <=> root.secret-mode; master-password <=> root.master-password;
+                    profiler-enabled <=> root.profiler-enabled; profiler-cpu: root.profiler-cpu; profiler-working-set: root.profiler-working-set;
+                    profiler-private-bytes: root.profiler-private-bytes; profiler-handles: root.profiler-handles; profiler-gdi-user: root.profiler-gdi-user;
+                    profiler-crash-status: root.profiler-crash-status; app-version: root.diag-app-version;
+                    changelog-text: root.changelog-text; update-check-status: root.update-check-status;
+                    save-ts-connection-settings => { root.save-ts-connection-settings(); } restart-ts-engine => { root.restart-ts-engine(); }
+                    select-engine-version(i) => { root.select-engine-version(i); } refresh-engine-versions => { root.refresh-engine-versions(); }
+                    download-update-engine => { root.download-update-engine(); } pick-engine-exe => { root.pick-engine-exe(); }
+                    open-web-panel => { root.open-web-panel(); } copy-ts-browser-url => { root.copy-ts-browser-url(); }
+                    copy-ts-lan-url => { root.copy-ts-lan-url(); } refresh-ts-addresses => { root.refresh-ts-addresses(); }
+                    save-ts-cache-settings => { root.save-ts-cache-settings(); } detect-players => { root.detect-players(); }
+                    pick-player-exe => { root.pick-player-exe(); } save-player-settings => { root.save-player-settings(); }
+                    save-and-test-rutracker => { root.save-and-test-rutracker(); } open-rutracker-webview => { root.open-rutracker-webview(); }
+                    change-theme-mode(m) => { root.change-theme-mode(m); } change-language(l) => { root.change-language(l); }
+                    set-autostart-mode(m) => { root.set-autostart-mode(m); } repair-autostart => { root.repair-autostart(); }
+                    toggle-start-minimized(v) => { root.toggle-start-minimized(v); } toggle-close-to-tray(v) => { root.toggle-close-to-tray(v); }
+                    toggle-keep-in-memory(v) => { root.toggle-keep-in-memory(v); } save-webdav-settings => { root.save-webdav-settings(); }
+                    test-webdav-connection => { root.test-webdav-connection(); } sync-webdav-now => { root.sync-webdav-now(); }
+                    toggle-profiler(v) => { root.toggle-profiler(v); } export-profiler-report => { root.export-profiler-report(); }
+                    check-github-updates => { root.check-github-updates(); }
                 }
             }
-        }
 
-        // Bottom Status Bar
-        Rectangle {
-            height: 28px;
-            background: Theme.card-bg;
-            border-width: 1px;
-            border-color: Theme.border-color;
-
-            sb-ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.open-diagnostics-tab(); }
-            }
-
-            HorizontalLayout {
-                padding-left: 14px;
-                padding-right: 14px;
-                spacing: 14px;
-
+            // Desktop Context Panel (320px)
+            if (Win11Theme.is-desktop && (root.detail-panel-open || root.active-tab == 3)) : Rectangle {
+                width: Win11Theme.detail-w; background: Win11Theme.window-bg;
                 HorizontalLayout {
-                    spacing: 6px;
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: 8px;
-                            height: 8px;
-                            border-radius: 4px;
-                            background: root.status-healthy ? Theme.success : Theme.danger;
-                        }
+                    padding-top: 12px; padding-bottom: 12px; padding-right: 12px;
+                    ContextSidePanel {
+                        horizontal-stretch: 1; active-tab: root.active-tab;
+                        diag-app-version: root.diag-app-version; diag-engine-version: root.diag-engine-version; diag-binary-status: root.diag-binary-status;
+                        diag-port-status: root.diag-port-status; diag-api-ping: root.diag-api-ping; diag-problem-hint: root.diag-problem-hint; diag-has-problem: root.diag-has-problem;
+                        torrent-hash: root.selected-torrent-hash; torrent-title: root.selected-torrent-title; loading: root.detail-loading;
+                        title: root.detail-title; original-title: root.detail-original-title; year: root.detail-year; genres: root.detail-genres;
+                        country: root.detail-country; rating-kp: root.detail-rating-kp; rating-imdb: root.detail-rating-imdb; description: root.detail-description;
+                        source-label: root.detail-source; tracker-url: root.detail-tracker-url; poster: root.detail-poster; has-poster: root.detail-has-poster;
+                        screenshots: root.detail-screenshots; files: root.selected-files; only-video-files <=> root.only-video-files;
+                        run-diagnostics-now => { root.run-diagnostics-now(); } copy-diagnostics-report => { root.copy-diagnostics-report(); }
+                        copy-diagnostics-for-ai => { root.copy-diagnostics-for-ai(); } clear-diagnostics-logs => { root.clear-diagnostics-logs(); }
+                        close-panel => { root.detail-panel-open = false; } refresh-metadata(h) => { root.refresh-torrent-metadata(h); }
+                        play-file(h, id) => { root.play-file(h, id); } play-all-m3u(h) => { root.play-all-m3u(h); }
+                        copy-stream-url(h, id) => { root.copy-stream-url(h, id); } toggle-only-video(v) => { root.toggle-only-video(v); }
+                        open-external-url(u) => { root.open-external-url(u); }
+                        open-lightbox(img, u) => { root.lightbox-image = img; root.lightbox-url = u; root.lightbox-visible = true; }
+                        watch-trailer(h, t) => { root.watch-trailer(h, t); }
                     }
-                    Text {
-                        text: root.status-text;
-                        font-family: Theme.font-ui;
-                        font-size: 11px;
-                        color: Theme.text-primary;
-                        vertical-alignment: center;
-                    }
-                }
-
-                if (root.status-version != "") : Text {
-                    text: "TorrServer " + root.status-version;
-                    font-family: Theme.font-ui;
-                    font-size: 11px;
-                    color: Theme.text-secondary;
-                    vertical-alignment: center;
-                }
-
-                Text {
-                    text: "Скорость: " + root.status-speed;
-                    font-family: Theme.font-ui;
-                    font-size: 11px;
-                    color: Theme.text-secondary;
-                    vertical-alignment: center;
-                }
-
-                Text {
-                    text: "Раздач: " + root.status-active-count;
-                    font-family: Theme.font-ui;
-                    font-size: 11px;
-                    color: Theme.text-secondary;
-                    vertical-alignment: center;
-                }
-
-                Rectangle { horizontal-stretch: 1; }
-
-                Text {
-                    text: "Нажмите для открытия диагностики";
-                    font-family: Theme.font-ui;
-                    font-size: 11px;
-                    color: sb-ta.has-hover ? Theme.accent : Theme.text-secondary;
-                    vertical-alignment: center;
                 }
             }
         }
+
+        if (Win11Theme.is-mobile) : MobileBottomTabs { active-tab <=> root.active-tab; }
+        StatusBar {
+            healthy: root.status-healthy; status-text: root.status-text; status-version: root.status-version;
+            status-speed: root.status-speed; active-count: root.status-active-count; app-version: root.diag-app-version;
+            open-diagnostics => { root.open-diagnostics-tab(); }
+        }
+    }
+
+    // Touch / Pointer Swipe Zone (Mobile & Tablet bottom edge-free strip)
+    if (!Win11Theme.is-desktop) : TouchArea {
+        x: 24px; y: root.height - (Win11Theme.is-mobile ? 80px : 32px);
+        width: max(0px, root.width - 48px); height: 28px;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) { root.swipe-start-x = self.mouse-x; root.swipe-start-y = self.mouse-y; root.swipe-tracking = true; }
+            else if (ev.kind == PointerEventKind.up && root.swipe-tracking) {
+                root.swipe-tracking = false;
+                if (self.mouse-x - root.swipe-start-x > 45px && abs(self.mouse-x - root.swipe-start-x) > abs(self.mouse-y - root.swipe-start-y)) {
+                    if (AppState.mobile-detail-open) { AppState.mobile-detail-open = false; } else if (Win11Theme.is-mobile) { AppState.mobile-drawer-open = true; }
+                } else if (root.swipe-start-x - self.mouse-x > 45px && abs(self.mouse-x - root.swipe-start-x) > abs(self.mouse-y - root.swipe-start-y)) {
+                    if (AppState.mobile-drawer-open) { AppState.mobile-drawer-open = false; } else { AppState.mobile-detail-open = true; }
+                }
+            }
+        }
+    }
+
+    if (Win11Theme.is-mobile && AppState.mobile-drawer-open) : MobileNavDrawer {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        active-tab <=> root.active-tab; theme-mode <=> root.theme-mode;
+        change-theme-mode(m) => { root.change-theme-mode(m); }
+    }
+
+    if (!Win11Theme.is-desktop && AppState.mobile-detail-open) : Rectangle {
+        x: 0px; y: 0px; width: root.width; height: root.height; background: #00000070;
+        TouchArea { clicked => { AppState.mobile-detail-open = false; } }
+        Rectangle {
+            x: root.width - min(340px, root.width * 0.92); y: 0px;
+            width: min(340px, root.width * 0.92); height: root.height; background: Win11Theme.window-bg;
+            TouchArea { }
+            ContextSidePanel {
+                width: parent.width; height: parent.height; active-tab: root.active-tab;
+                diag-app-version: root.diag-app-version; diag-engine-version: root.diag-engine-version; diag-binary-status: root.diag-binary-status;
+                diag-port-status: root.diag-port-status; diag-api-ping: root.diag-api-ping; diag-problem-hint: root.diag-problem-hint; diag-has-problem: root.diag-has-problem;
+                torrent-hash: root.selected-torrent-hash; torrent-title: root.selected-torrent-title; loading: root.detail-loading;
+                title: root.detail-title; original-title: root.detail-original-title; year: root.detail-year; genres: root.detail-genres;
+                country: root.detail-country; rating-kp: root.detail-rating-kp; rating-imdb: root.detail-rating-imdb; description: root.detail-description;
+                source-label: root.detail-source; tracker-url: root.detail-tracker-url; poster: root.detail-poster; has-poster: root.detail-has-poster;
+                screenshots: root.detail-screenshots; files: root.selected-files; only-video-files <=> root.only-video-files;
+                run-diagnostics-now => { root.run-diagnostics-now(); } copy-diagnostics-report => { root.copy-diagnostics-report(); }
+                copy-diagnostics-for-ai => { root.copy-diagnostics-for-ai(); } clear-diagnostics-logs => { root.clear-diagnostics-logs(); }
+                close-panel => { AppState.mobile-detail-open = false; } refresh-metadata(h) => { root.refresh-torrent-metadata(h); }
+                play-file(h, id) => { root.play-file(h, id); } play-all-m3u(h) => { root.play-all-m3u(h); }
+                copy-stream-url(h, id) => { root.copy-stream-url(h, id); } toggle-only-video(v) => { root.toggle-only-video(v); }
+                open-external-url(u) => { root.open-external-url(u); }
+                open-lightbox(img, u) => { root.lightbox-image = img; root.lightbox-url = u; root.lightbox-visible = true; }
+                watch-trailer(h, t) => { root.watch-trailer(h, t); }
+            }
+        }
+    }
+
+    if (root.lightbox-visible) : LightboxModal {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        open <=> root.lightbox-visible; img: root.lightbox-image; url: root.lightbox-url;
+        open-external-url(u) => { root.open-external-url(u); }
+    }
+    if (root.sync-conflict-visible) : SyncConflictModal {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        open <=> root.sync-conflict-visible; info: root.sync-conflict-info;
+        resolve(c) => { root.resolve-sync-conflict(c); }
+    }
+    if (root.toast-visible) : ToastBanner {
+        x: (root.width - self.width) / 2; y: root.height - 76px;
+        width: min(root.width - 24px, 400px); message: root.toast-message;
     }
 }

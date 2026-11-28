@@ -1,15 +1,14 @@
-import { ComboBox, LineEdit, CheckBox, ScrollView } from "std-widgets.slint";
-import { Theme, TorrentItem, TorrentFileItem, ScreenshotItem } from "../../theme.slint";
-import { FluentCard, FluentButton, FluentMenuItem } from "../../components.slint";
+import { ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Win11Theme, TorrentItem } from "../../theme.slint";
+import { AppState } from "../../globals.slint";
+import { FluentCard, FluentButton, FluentMenuItem, FilterPill, SvgIcon } from "../../components.slint";
+import { DenseTorrentRow } from "../../torrent_row.slint";
 
 export component TorrentsView inherits Rectangle {
     in-out property <string> magnet-input: "";
     in-out property <[TorrentItem]> torrents;
     in-out property <int> torrents-sort-mode: 0;
     in-out property <string> selected-torrent-hash: "";
-    in-out property <string> selected-torrent-title: "";
-    in-out property <[TorrentFileItem]> selected-files;
-    in-out property <bool> only-video-files: true;
     in-out property <bool> engine-missing: false;
     in-out property <bool> engine-updating: false;
     in-out property <string> engine-update-status: "";
@@ -20,24 +19,7 @@ export component TorrentsView inherits Rectangle {
     in-out property <bool> is-remote-mode: false;
     in-out property <bool> status-healthy: false;
 
-    // Right Detail Panel (Poster, Description, Ratings, Screenshots)
-    in-out property <bool> detail-panel-open: true;
-    in-out property <bool> detail-loading: false;
-    in-out property <string> detail-title: "";
-    in-out property <string> detail-original-title: "";
-    in-out property <string> detail-year: "";
-    in-out property <string> detail-genres: "";
-    in-out property <string> detail-country: "";
-    in-out property <string> detail-rating-kp: "";
-    in-out property <string> detail-rating-imdb: "";
-    in-out property <string> detail-description: "";
-    in-out property <string> detail-source: "";
-    in-out property <string> detail-tracker-url: "";
-    in-out property <image> detail-poster;
-    in-out property <bool> detail-has-poster: false;
-    in-out property <[ScreenshotItem]> detail-screenshots;
-
-    // Info Modal Overlay
+    // Info Modal
     in-out property <bool> torrent-info-visible: false;
     in-out property <string> info-hash: "";
     in-out property <string> info-title: "";
@@ -57,13 +39,11 @@ export component TorrentsView inherits Rectangle {
     callback select-torrent(string);
     callback refresh-torrents();
     callback set-torrents-sort(int);
+    callback set-torrents-filter(int);
     callback drop-torrent(string);
     callback remove-torrent(string);
     callback copy-torrent-magnet(string);
     callback play-file(string, int);
-    callback play-all-m3u(string);
-    callback copy-stream-url(string, int);
-    callback toggle-only-video(bool);
     callback select-engine-version(int);
     callback refresh-engine-versions();
     callback download-update-engine();
@@ -75,1054 +55,326 @@ export component TorrentsView inherits Rectangle {
     callback refresh-single-torrent(string);
     callback show-torrent-info(string);
     callback open-tracker-page(string);
-    callback refresh-torrent-metadata(string);
-    callback open-external-url(string);
 
     property <length> ctx-x: 0px;
     property <length> ctx-y: 0px;
     property <string> ctx-torrent-hash: "";
-    property <int> ctx-file-id: 0;
-
-    // Local screenshot lightbox state
-    property <bool> lightbox-visible: false;
-    property <image> lightbox-image;
-    property <string> lightbox-url: "";
-
     background: transparent;
 
     torrent-ctx-menu := PopupWindow {
         x: root.ctx-x;
         y: root.ctx-y;
-        width: 312px;
-        height: 280px;
+        width: 280px;
+        height: 262px;
         close-policy: PopupClosePolicy.close-on-click-outside;
 
         Rectangle {
-            background: Theme.card-bg;
-            border-radius: Theme.radius-card;
+            background: Win11Theme.card-bg;
+            border-radius: Win11Theme.radius-card;
             border-width: 1px;
-            border-color: Theme.border-color;
+            border-color: Win11Theme.border-color;
             drop-shadow-blur: 14px;
             drop-shadow-color: #00000040;
-
             VerticalLayout {
                 padding: 4px;
                 spacing: 2px;
-
-                FluentMenuItem {
-                    text: "▶  Воспроизвести";
-                    clicked => {
-                        torrent-ctx-menu.close();
-                        root.play-file(root.ctx-torrent-hash, -1);
-                    }
-                }
-                FluentMenuItem {
-                    text: "⬇  Скачать плейлист торрента";
-                    clicked => {
-                        torrent-ctx-menu.close();
-                        root.download-torrent-playlist(root.ctx-torrent-hash);
-                    }
-                }
-                FluentMenuItem {
-                    text: "⧉  Скопировать магнет-ссылку";
-                    clicked => {
-                        torrent-ctx-menu.close();
-                        root.copy-torrent-magnet(root.ctx-torrent-hash);
-                    }
-                }
-                FluentMenuItem {
-                    text: "✕  Удалить с сервера";
-                    danger: true;
-                    clicked => {
-                        torrent-ctx-menu.close();
-                        root.remove-torrent(root.ctx-torrent-hash);
-                    }
-                }
-                FluentMenuItem {
-                    text: "↻  Обновить торрент";
-                    clicked => {
-                        torrent-ctx-menu.close();
-                        root.refresh-single-torrent(root.ctx-torrent-hash);
-                    }
-                }
-                FluentMenuItem {
-                    text: "ℹ  Получить информацию о торренте";
-                    clicked => {
-                        torrent-ctx-menu.close();
-                        root.show-torrent-info(root.ctx-torrent-hash);
-                    }
-                }
-                FluentMenuItem {
-                    text: "🌐  Страница раздачи на трекере";
-                    clicked => {
-                        torrent-ctx-menu.close();
-                        root.open-tracker-page(root.ctx-torrent-hash);
-                    }
-                }
-                FluentMenuItem {
-                    text: "📋  Скачать плейлист всех торрентов сервера";
-                    clicked => {
-                        torrent-ctx-menu.close();
-                        root.download-all-playlist();
-                    }
-                }
-            }
-        }
-    }
-
-    file-ctx-menu := PopupWindow {
-        x: root.ctx-x;
-        y: root.ctx-y;
-        width: 236px;
-        height: 110px;
-        close-policy: PopupClosePolicy.close-on-click-outside;
-
-        Rectangle {
-            background: Theme.card-bg;
-            border-radius: Theme.radius-card;
-            border-width: 1px;
-            border-color: Theme.border-color;
-            drop-shadow-blur: 14px;
-            drop-shadow-color: #00000040;
-
-            VerticalLayout {
-                padding: 4px;
-                spacing: 2px;
-
-                FluentMenuItem {
-                    text: "▶  Открыть в плеере";
-                    clicked => {
-                        file-ctx-menu.close();
-                        root.play-file(root.selected-torrent-hash, root.ctx-file-id);
-                    }
-                }
-                FluentMenuItem {
-                    text: "⧉  Копировать прямую ссылку";
-                    clicked => {
-                        file-ctx-menu.close();
-                        root.copy-stream-url(root.selected-torrent-hash, root.ctx-file-id);
-                    }
-                }
-                FluentMenuItem {
-                    text: "☰  Запустить все серии (.m3u)";
-                    clicked => {
-                        file-ctx-menu.close();
-                        root.play-all-m3u(root.selected-torrent-hash);
-                    }
-                }
+                FluentMenuItem { text: @tr("Воспроизвести"); icon-path: "M 7 5 L 19 12 L 7 19 Z"; clicked => { torrent-ctx-menu.close(); root.play-file(root.ctx-torrent-hash, -1); } }
+                FluentMenuItem { text: @tr("Скачать плейлист торрента"); icon-path: "M 4 6 L 16 6 M 4 12 L 16 12 M 4 18 L 12 18 M 17 15 L 21 17.5 L 17 20 Z"; clicked => { torrent-ctx-menu.close(); root.download-torrent-playlist(root.ctx-torrent-hash); } }
+                FluentMenuItem { text: @tr("Скопировать магнет-ссылку"); icon-path: "M 10 14 L 14 10 M 7 17 A 4 4 0 0 1 7 11 L 9 9 M 17 7 A 4 4 0 0 1 17 13 L 15 15"; clicked => { torrent-ctx-menu.close(); root.copy-torrent-magnet(root.ctx-torrent-hash); } }
+                FluentMenuItem { text: @tr("Удалить с сервера"); icon-path: "M 4 6 L 20 6 M 9 6 L 9 4 L 15 4 L 15 6 M 7 6 L 8 20 L 16 20 L 17 6"; danger: true; clicked => { torrent-ctx-menu.close(); root.remove-torrent(root.ctx-torrent-hash); } }
+                FluentMenuItem { text: @tr("Обновить торрент"); icon-path: "M 20 11 A 8 8 0 1 0 18 17 M 20 4 L 20 11 L 13 11"; clicked => { torrent-ctx-menu.close(); root.refresh-single-torrent(root.ctx-torrent-hash); } }
+                FluentMenuItem { text: @tr("Получить информацию о торренте"); icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 12 11 L 12 16 M 12 8 L 12 8.5"; clicked => { torrent-ctx-menu.close(); root.show-torrent-info(root.ctx-torrent-hash); } }
+                FluentMenuItem { text: @tr("Страница раздачи на трекере"); icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 3 12 L 21 12"; clicked => { torrent-ctx-menu.close(); root.open-tracker-page(root.ctx-torrent-hash); } }
+                FluentMenuItem { text: @tr("Скачать плейлист всех торрентов"); icon-path: "M 4 6 L 16 6 M 4 12 L 16 12 M 4 18 L 12 18 M 17 15 L 21 17.5 L 17 20 Z"; clicked => { torrent-ctx-menu.close(); root.download-all-playlist(); } }
             }
         }
     }
 
     VerticalLayout {
-        padding: 20px;
-        spacing: 12px;
+        padding: Win11Theme.is-mobile ? 8px : 12px;
+        spacing: 8px;
 
-        // Header
+        // Compact Top Action Toolbar (34px desktop / 42px mobile)
         HorizontalLayout {
-            alignment: space-between;
-            VerticalLayout {
-                spacing: 2px;
-                Text {
-                    text: "Раздачи";
-                    font-family: Theme.font-ui;
-                    font-size: 22px;
-                    font-weight: 600;
-                    color: Theme.text-primary;
-                }
-                Text {
-                    text: "Управление активными торрентами, файлами и прямым стримингом";
-                    font-family: Theme.font-ui;
-                    font-size: 12px;
-                    color: Theme.text-secondary;
+            spacing: 6px;
+            LineEdit {
+                horizontal-stretch: 1;
+                height: Win11Theme.ctrl-h;
+                text <=> root.magnet-input;
+                placeholder-text: @tr("Magnet-ссылка или infohash...");
+                accepted => {
+                    if (root.magnet-input != "") { root.add-magnet(root.magnet-input); }
                 }
             }
+            FluentButton {
+                primary: true;
+                icon-path: "M 12 5 L 12 19 M 5 12 L 19 12";
+                text: Win11Theme.is-desktop ? @tr("Добавить") : "";
+                clicked => {
+                    if (root.magnet-input != "") { root.add-magnet(root.magnet-input); }
+                }
+            }
+            FluentButton {
+                icon-path: "M 9 4 L 15 4 L 15 6 L 9 6 Z M 7 5 L 5 5 L 5 20 L 19 20 L 19 5 L 17 5";
+                clicked => { root.paste-and-add-magnet(); }
+            }
+            FluentButton {
+                icon-path: "M 3 6 L 9 6 L 11 8 L 21 8 L 21 19 L 3 19 Z";
+                text: Win11Theme.is-desktop ? ".torrent" : "";
+                clicked => { root.pick-torrent-file(); }
+            }
+            if (!Win11Theme.is-mobile) : FluentButton {
+                icon-path: "M 7 5 L 10 5 L 10 19 L 7 19 Z M 14 5 L 17 5 L 17 19 L 14 19 Z";
+                clicked => {
+                    if (root.selected-torrent-hash != "") { root.drop-torrent(root.selected-torrent-hash); }
+                }
+            }
+            FluentButton {
+                icon-path: "M 20 11 A 8 8 0 1 0 18 17 M 20 4 L 20 11 L 13 11";
+                clicked => { root.refresh-torrents(); }
+            }
+        }
+
+        // Live Telemetry Strip
+        Rectangle {
+            height: Win11Theme.is-mobile ? 28px : 26px;
+            border-radius: Win11Theme.radius-ctrl;
+            background: Win11Theme.card-bg;
+            border-width: 1px;
+            border-color: Win11Theme.border-color;
             HorizontalLayout {
-                alignment: center;
-                spacing: 8px;
-                FluentButton {
-                    text: "⬇  Экспорт .json";
-                    clicked => { root.export-torrents(); }
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 12px;
+                Text {
+                    text: "↓ " + AppState.telemetry-down-speed + "  •  ↑ " + AppState.telemetry-up-speed;
+                    font-family: Win11Theme.font-mono;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: Win11Theme.accent;
+                    vertical-alignment: center;
                 }
-                FluentButton {
-                    text: "⬆  Импорт .json";
-                    clicked => { root.import-torrents(); }
+                Text {
+                    text: @tr("Кеш:") + " " + AppState.telemetry-cache-usage;
+                    font-family: Win11Theme.font-ui;
+                    font-size: 11px;
+                    color: Win11Theme.text-secondary;
+                    vertical-alignment: center;
                 }
-                FluentButton {
-                    text: "↻  Обновить";
-                    clicked => { root.refresh-torrents(); }
+                if (!Win11Theme.is-mobile) : Text {
+                    text: @tr("Буфер:") + " " + AppState.telemetry-buffer-pct + "%";
+                    font-family: Win11Theme.font-ui;
+                    font-size: 11px;
+                    color: Win11Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: "API: " + AppState.telemetry-ping;
+                    font-family: Win11Theme.font-mono;
+                    font-size: 11px;
+                    color: root.status-healthy ? Win11Theme.status-ok : Win11Theme.text-secondary;
+                    vertical-alignment: center;
                 }
             }
         }
 
-        // Missing Engine Banner
-        if (root.engine-missing && !root.is-remote-mode && !root.status-healthy) : Rectangle {
-            border-radius: Theme.radius-card;
-            background: Theme.info-bg;
+        // Filter Pills with Counters + Sort / Backup actions
+        HorizontalLayout {
+            spacing: 6px;
+            HorizontalLayout {
+                horizontal-stretch: 1;
+                spacing: 5px;
+                FilterPill { text: @tr("Все"); count: AppState.count-all; active: AppState.filter-mode == 0; clicked => { AppState.filter-mode = 0; root.set-torrents-filter(0); } }
+                FilterPill { text: @tr("Активные"); count: AppState.count-active; active: AppState.filter-mode == 1; clicked => { AppState.filter-mode = 1; root.set-torrents-filter(1); } }
+                if (!Win11Theme.is-mobile) : FilterPill { text: @tr("4K / HDR"); count: AppState.count-4k; active: AppState.filter-mode == 2; clicked => { AppState.filter-mode = 2; root.set-torrents-filter(2); } }
+                if (!Win11Theme.is-mobile) : FilterPill { text: @tr("Сериалы"); count: AppState.count-series; active: AppState.filter-mode == 3; clicked => { AppState.filter-mode = 3; root.set-torrents-filter(3); } }
+                FilterPill { text: @tr("Завершённые"); count: AppState.count-completed; active: AppState.filter-mode == 4; clicked => { AppState.filter-mode = 4; root.set-torrents-filter(4); } }
+            }
+            if (!Win11Theme.is-mobile) : ComboBox {
+                width: 148px;
+                model: [@tr("Новые сверху"), @tr("Старые сверху"), @tr("По названию"), @tr("По размеру"), @tr("По скорости")];
+                current-index <=> root.torrents-sort-mode;
+                selected => { root.set-torrents-sort(self.current-index); }
+            }
+            if (Win11Theme.is-desktop) : FluentButton { compact: true; text: @tr("Экспорт"); clicked => { root.export-torrents(); } }
+            if (Win11Theme.is-desktop) : FluentButton { compact: true; text: @tr("Импорт"); clicked => { root.import-torrents(); } }
+        }
+
+        // Engine Missing / Update Banner
+        if (!root.is-remote-mode && (root.engine-missing && !root.status-healthy || root.engine-updating)) : Rectangle {
+            border-radius: Win11Theme.radius-card;
+            background: Win11Theme.info-bg;
             border-width: 1px;
-            border-color: Theme.accent;
-
+            border-color: Win11Theme.accent;
             VerticalLayout {
-                padding: 12px;
-                spacing: 8px;
-
-                HorizontalLayout {
-                    spacing: 12px;
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        spacing: 2px;
-                        Text {
-                            text: "Движок TorrServer-windows-amd64.exe не найден в data/torrserver/";
-                            font-family: Theme.font-ui;
-                            font-size: 13px;
-                            font-weight: 600;
-                            color: Theme.text-primary;
-                        }
-                        Text {
-                            text: root.engine-update-status != ""
-                                ? root.engine-update-status
-                                : "Выберите нужную версию TorrServer MatriX (YouROK/TorrServer) и скачайте с GitHub или укажите локальный .exe.";
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            color: root.engine-updating ? Theme.accent : Theme.text-secondary;
-                            wrap: word-wrap;
-                        }
-                        if (root.engine-updating) : Rectangle {
-                            height: 6px;
-                            border-radius: 3px;
-                            background: Theme.border-color;
-                            Rectangle {
-                                x: 0px;
-                                y: 0px;
-                                height: 6px;
-                                border-radius: 3px;
-                                width: parent.width * clamp(root.engine-update-progress, 0.0, 1.0);
-                                background: Theme.accent;
-                            }
-                        }
-                    }
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: 8px;
-                        FluentButton {
-                            text: root.engine-updating ? "Загрузка..." : "⬇  Скачать MatriX";
-                            primary: true;
-                            enabled: !root.engine-updating;
-                            clicked => { root.download-update-engine(); }
-                        }
-                        FluentButton {
-                            text: "Указать .exe...";
-                            enabled: !root.engine-updating;
-                            clicked => { root.pick-engine-exe(); }
-                        }
-                    }
-                }
-
+                padding: 10px;
+                spacing: 6px;
                 HorizontalLayout {
                     spacing: 8px;
                     Text {
-                        text: "Версия MatriX:";
-                        font-family: Theme.font-ui;
+                        horizontal-stretch: 1;
+                        text: root.engine-updating ? root.engine-update-status : @tr("Требуется движок TorrServer MatriX для локального режима");
+                        font-family: Win11Theme.font-ui;
                         font-size: 12px;
-                        color: Theme.text-secondary;
+                        font-weight: 600;
+                        color: Win11Theme.text-primary;
+                        wrap: word-wrap;
                         vertical-alignment: center;
                     }
-                    ComboBox {
-                        horizontal-stretch: 1;
+                    if (!root.engine-updating) : ComboBox {
+                        width: 190px;
                         model: root.engine-version-presets;
                         current-index <=> root.engine-version-selected-idx;
                         selected => { root.select-engine-version(self.current-index); }
                     }
                     FluentButton {
-                        text: root.engine-versions-loading ? "..." : "↻";
                         compact: true;
-                        enabled: !root.engine-versions-loading && !root.engine-updating;
-                        clicked => { root.refresh-engine-versions(); }
-                    }
-                }
-            }
-        }
-
-        // Quick Add Card
-        FluentCard {
-            VerticalLayout {
-                padding: 12px;
-                spacing: 8px;
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    LineEdit {
-                        horizontal-stretch: 1;
-                        text <=> root.magnet-input;
-                        placeholder-text: "Вставьте Magnet-ссылку или перетащите .torrent-файл в окно...";
-                        accepted => {
-                            if (root.magnet-input != "") {
-                                root.add-magnet(root.magnet-input);
-                            }
-                        }
-                    }
-                    FluentButton {
-                        text: "Добавить";
                         primary: true;
-                        clicked => {
-                            if (root.magnet-input != "") {
-                                root.add-magnet(root.magnet-input);
-                            }
-                        }
+                        text: root.engine-updating ? "..." : @tr("Скачать");
+                        enabled: !root.engine-updating;
+                        clicked => { root.download-update-engine(); }
                     }
                     FluentButton {
-                        text: "Вставить";
-                        clicked => { root.paste-and-add-magnet(); }
-                    }
-                    FluentButton {
-                        text: ".torrent";
-                        clicked => { root.pick-torrent-file(); }
+                        compact: true;
+                        text: ".exe...";
+                        enabled: !root.engine-updating;
+                        clicked => { root.pick-engine-exe(); }
                     }
                 }
-
-                Text {
-                    text: "Подсказка: поддерживается Drag-and-Drop .torrent файлов прямо в окно, а также ПКМ по раздаче или файлу.";
-                    font-family: Theme.font-ui;
-                    font-size: 11px;
-                    color: Theme.text-secondary;
+                if (root.engine-updating) : Rectangle {
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Win11Theme.border-color;
+                    Rectangle {
+                        x: 0px; y: 0px; height: 4px; border-radius: 2px;
+                        width: parent.width * clamp(root.engine-update-progress, 0.0, 1.0);
+                        background: Win11Theme.accent;
+                    }
                 }
             }
         }
 
-        // Main Split Workspace: Left (Torrents + Files) | Right (Movie Info, Poster, Screenshots)
-        HorizontalLayout {
+        // Dense Torrents List
+        FluentCard {
             vertical-stretch: 1;
-            spacing: 12px;
+            clip: true;
 
-            // Left Column
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 12px;
-
-                // Torrents List
-                FluentCard {
-                    vertical-stretch: 1;
-                    clip: true;
-
-                    if (root.torrents.length == 0) : VerticalLayout {
-                        alignment: center;
-                        spacing: 6px;
-                        Text {
-                            text: "Список раздач пуст";
-                            font-family: Theme.font-ui;
-                            font-size: 15px;
-                            font-weight: 600;
-                            color: Theme.text-primary;
-                            horizontal-alignment: center;
-                        }
-                        Text {
-                            text: "Добавьте Magnet-ссылку, выберите .torrent или перейдите на вкладку «Поиск»";
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            color: Theme.text-secondary;
-                            horizontal-alignment: center;
-                        }
-                    }
-
-                    if (root.torrents.length > 0) : VerticalLayout {
-                        vertical-stretch: 1;
-
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            padding-top: 8px;
-                            padding-bottom: 8px;
-                            spacing: 10px;
-                            Text {
-                                text: "Всего раздач: " + root.torrents.length;
-                                font-family: Theme.font-ui;
-                                font-size: 12px;
-                                font-weight: 600;
-                                color: Theme.text-secondary;
-                                vertical-alignment: center;
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                            Text {
-                                text: "Сортировка:";
-                                font-family: Theme.font-ui;
-                                font-size: 12px;
-                                color: Theme.text-secondary;
-                                vertical-alignment: center;
-                            }
-                            ComboBox {
-                                width: 220px;
-                                model: [
-                                    "По дате (сначала новые)",
-                                    "По дате (сначала старые)",
-                                    "По названию (А–Я)",
-                                    "По размеру",
-                                    "По скорости"
-                                ];
-                                current-index <=> root.torrents-sort-mode;
-                                selected => { root.set-torrents-sort(self.current-index); }
-                            }
-                        }
-
-                        Rectangle {
-                            height: 1px;
-                            background: Theme.border-color;
-                        }
-
-                        sv-torrents := ScrollView {
-                            vertical-stretch: 1;
-                            VerticalLayout {
-                                width: sv-torrents.visible-width;
-                                padding: 8px;
-                                spacing: 6px;
-
-                                for item in root.torrents : Rectangle {
-                                    border-radius: Theme.radius-ctrl;
-                                    border-width: 1px;
-                                    border-color: item.is-selected ? Theme.accent : Theme.border-color;
-                                    background: item.is-selected
-                                        ? Theme.info-bg
-                                        : (row-ta.has-hover ? Theme.card-hover : Theme.subtle-bg);
-
-                                    row-ta := TouchArea {
-                                        mouse-cursor: pointer;
-                                        pointer-event(event) => {
-                                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
-                                                root.detail-panel-open = true;
-                                                root.select-torrent(item.hash);
-                                            }
-                                            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
-                                                root.select-torrent(item.hash);
-                                                root.ctx-torrent-hash = item.hash;
-                                                root.ctx-x = min(self.absolute-position.x - root.absolute-position.x + self.mouse-x, max(0px, root.width - 318px));
-                                                root.ctx-y = min(self.absolute-position.y - root.absolute-position.y + self.mouse-y, max(0px, root.height - 286px));
-                                                torrent-ctx-menu.show();
-                                            }
-                                        }
-                                    }
-
-                                    VerticalLayout {
-                                        padding: 10px;
-                                        spacing: 6px;
-
-                                        HorizontalLayout {
-                                            spacing: 10px;
-                                            Text {
-                                                horizontal-stretch: 1;
-                                                text: item.title;
-                                                font-family: Theme.font-ui;
-                                                font-size: 13px;
-                                                font-weight: 600;
-                                                color: Theme.text-primary;
-                                                overflow: elide;
-                                                vertical-alignment: center;
-                                            }
-                                            Text {
-                                                text: item.size-text;
-                                                font-family: Theme.font-ui;
-                                                font-size: 12px;
-                                                color: Theme.text-secondary;
-                                                vertical-alignment: center;
-                                            }
-                                            FluentButton {
-                                                text: "▶";
-                                                compact: true;
-                                                primary: true;
-                                                clicked => { root.play-file(item.hash, -1); }
-                                            }
-                                            FluentButton {
-                                                text: "✕";
-                                                compact: true;
-                                                danger: true;
-                                                clicked => { root.remove-torrent(item.hash); }
-                                            }
-                                        }
-
-                                        // Progress Bar
-                                        Rectangle {
-                                            height: 4px;
-                                            border-radius: 2px;
-                                            background: Theme.border-color;
-                                            Rectangle {
-                                                x: 0px;
-                                                y: 0px;
-                                                height: 4px;
-                                                border-radius: 2px;
-                                                width: parent.width * clamp(item.progress, 0.0, 1.0);
-                                                background: Theme.accent;
-                                            }
-                                        }
-
-                                        HorizontalLayout {
-                                            spacing: 14px;
-                                            Text {
-                                                text: item.status-text;
-                                                font-family: Theme.font-ui;
-                                                font-size: 11px;
-                                                color: Theme.text-secondary;
-                                            }
-                                            if (item.added-text != "") : Text {
-                                                text: "Добавлен: " + item.added-text;
-                                                font-family: Theme.font-ui;
-                                                font-size: 11px;
-                                                color: Theme.text-secondary;
-                                            }
-                                            Text {
-                                                text: "Скорость: " + item.speed-text;
-                                                font-family: Theme.font-ui;
-                                                font-size: 11px;
-                                                color: Theme.accent;
-                                            }
-                                            Text {
-                                                text: "Пиры/Сиды: " + item.peers-text;
-                                                font-family: Theme.font-ui;
-                                                font-size: 11px;
-                                                color: Theme.text-secondary;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+            if (root.torrents.length == 0) : VerticalLayout {
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: @tr("Список раздач пуст");
+                    font-family: Win11Theme.font-ui;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Win11Theme.text-primary;
+                    horizontal-alignment: center;
                 }
-
-                // Bottom Selected Torrent Files Panel
-                if (root.selected-torrent-hash != "") : FluentCard {
-                    height: 210px;
-                    clip: true;
-
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 8px;
-
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text {
-                                horizontal-stretch: 1;
-                                text: "Файлы: " + root.selected-torrent-title;
-                                font-family: Theme.font-ui;
-                                font-size: 13px;
-                                font-weight: 600;
-                                color: Theme.text-primary;
-                                overflow: elide;
-                                vertical-alignment: center;
-                            }
-                            CheckBox {
-                                text: "Только видео";
-                                checked <=> root.only-video-files;
-                                toggled => { root.toggle-only-video(self.checked); }
-                            }
-                            FluentButton {
-                                text: "☰  Плейлист .m3u";
-                                compact: true;
-                                clicked => { root.play-all-m3u(root.selected-torrent-hash); }
-                            }
-                            if (!root.detail-panel-open) : FluentButton {
-                                text: "ℹ  Описание";
-                                compact: true;
-                                clicked => { root.detail-panel-open = true; }
-                            }
-                        }
-
-                        sv-files := ScrollView {
-                            vertical-stretch: 1;
-                            VerticalLayout {
-                                width: sv-files.visible-width;
-                                spacing: 4px;
-
-                                for f in root.selected-files : Rectangle {
-                                    height: 36px;
-                                    border-radius: Theme.radius-ctrl;
-                                    background: f-ta.has-hover ? Theme.card-hover : Theme.subtle-bg;
-                                    border-width: 1px;
-                                    border-color: Theme.border-color;
-
-                                    f-ta := TouchArea {
-                                        mouse-cursor: pointer;
-                                        pointer-event(event) => {
-                                            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
-                                                root.ctx-file-id = f.id;
-                                                root.ctx-x = min(self.absolute-position.x - root.absolute-position.x + self.mouse-x, max(0px, root.width - 242px));
-                                                root.ctx-y = min(self.absolute-position.y - root.absolute-position.y + self.mouse-y, max(0px, root.height - 118px));
-                                                file-ctx-menu.show();
-                                            }
-                                        }
-                                        double-clicked => {
-                                            root.play-file(root.selected-torrent-hash, f.id);
-                                        }
-                                    }
-
-                                    HorizontalLayout {
-                                        padding-left: 10px;
-                                        padding-right: 10px;
-                                        spacing: 8px;
-
-                                        Text {
-                                            text: f.is-watched ? "✓" : (f.is-video ? "🎬" : "📄");
-                                            font-family: Theme.font-ui;
-                                            font-size: 12px;
-                                            color: f.is-watched ? Theme.success : Theme.text-secondary;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            horizontal-stretch: 1;
-                                            text: f.name;
-                                            font-family: Theme.font-ui;
-                                            font-size: 12px;
-                                            color: f.is-watched ? Theme.text-secondary : Theme.text-primary;
-                                            overflow: elide;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            text: f.size-text;
-                                            font-family: Theme.font-ui;
-                                            font-size: 11px;
-                                            color: Theme.text-secondary;
-                                            vertical-alignment: center;
-                                        }
-                                        FluentButton {
-                                            text: "▶ Смотреть";
-                                            compact: true;
-                                            primary: f.is-video;
-                                            clicked => { root.play-file(root.selected-torrent-hash, f.id); }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                Text {
+                    text: @tr("Вставьте Magnet-ссылку сверху, перетащите .torrent-файл или откройте Поиск.");
+                    font-family: Win11Theme.font-ui;
+                    font-size: 11px;
+                    color: Win11Theme.text-secondary;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
                 }
             }
 
-            // Right Column: Movie / Torrent Poster, Ratings, Description & Screenshots
-            if (root.selected-torrent-hash != "" && root.detail-panel-open) : FluentCard {
-                width: 344px;
-                clip: true;
-
+            if (root.torrents.length > 0) : sv-list := ScrollView {
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 10px;
+                    width: sv-list.visible-width;
+                    padding: 6px;
+                    spacing: 4px;
+                    for t in root.torrents : DenseTorrentRow {
+                        title: t.title;
+                        quality-tag: t.quality-tag;
+                        tracker-tag: t.tracker-tag;
+                        down-speed: t.down-speed;
+                        up-speed: t.up-speed;
+                        size-text: t.size-text;
+                        peers-text: t.peers-text;
+                        cache-text: t.cache-text;
+                        status-text: t.status-text;
+                        progress: t.progress;
+                        is-active: t.is-active;
+                        selected: t.is-selected;
 
-                    // Panel Header
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Text {
-                            horizontal-stretch: 1;
-                            text: root.detail-source != "" ? ("О раздаче  •  " + root.detail-source) : "О фильме / раздаче";
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            font-weight: 600;
-                            color: Theme.text-secondary;
-                            overflow: elide;
-                            vertical-alignment: center;
-                        }
-                        FluentButton {
-                            text: root.detail-loading ? "..." : "↻";
-                            compact: true;
-                            enabled: !root.detail-loading;
-                            clicked => { root.refresh-torrent-metadata(root.selected-torrent-hash); }
-                        }
-                        FluentButton {
-                            text: "✕";
-                            compact: true;
-                            clicked => { root.detail-panel-open = false; }
-                        }
-                    }
-
-                    Rectangle {
-                        height: 1px;
-                        background: Theme.border-color;
-                    }
-
-                    sv-detail := ScrollView {
-                        vertical-stretch: 1;
-                        VerticalLayout {
-                            width: sv-detail.visible-width;
-                            spacing: 10px;
-
-                            // Poster + Basic Metadata Row
-                            HorizontalLayout {
-                                spacing: 10px;
-
-                                // Poster Box
-                                Rectangle {
-                                    width: 106px;
-                                    height: 156px;
-                                    border-radius: Theme.radius-ctrl;
-                                    border-width: 1px;
-                                    border-color: Theme.border-color;
-                                    background: Theme.subtle-bg;
-                                    clip: true;
-
-                                    if (root.detail-has-poster) : Image {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        source: root.detail-poster;
-                                        image-fit: cover;
-                                    }
-                                    if (!root.detail-has-poster) : VerticalLayout {
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Text {
-                                            text: root.detail-loading ? "⏳" : "🎬";
-                                            font-size: 26px;
-                                            horizontal-alignment: center;
-                                        }
-                                        Text {
-                                            text: root.detail-loading ? "Поиск..." : "Нет постера";
-                                            font-family: Theme.font-ui;
-                                            font-size: 10px;
-                                            color: Theme.text-secondary;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-                                }
-
-                                // Title, Year, Ratings, Genres
-                                VerticalLayout {
-                                    horizontal-stretch: 1;
-                                    spacing: 4px;
-
-                                    Text {
-                                        text: root.detail-title != "" ? root.detail-title : root.selected-torrent-title;
-                                        font-family: Theme.font-ui;
-                                        font-size: 14px;
-                                        font-weight: 600;
-                                        color: Theme.text-primary;
-                                        wrap: word-wrap;
-                                    }
-
-                                    if (root.detail-original-title != "") : Text {
-                                        text: root.detail-original-title;
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: Theme.text-secondary;
-                                        wrap: word-wrap;
-                                    }
-
-                                    // Ratings Row
-                                    if (root.detail-rating-kp != "" || root.detail-rating-imdb != "") : HorizontalLayout {
-                                        spacing: 6px;
-                                        padding-top: 2px;
-                                        if (root.detail-rating-kp != "") : Rectangle {
-                                            height: 20px;
-                                            border-radius: 4px;
-                                            background: #FF660022;
-                                            border-width: 1px;
-                                            border-color: #FF6600;
-                                            HorizontalLayout {
-                                                padding-left: 6px;
-                                                padding-right: 6px;
-                                                Text {
-                                                    text: "КП " + root.detail-rating-kp;
-                                                    font-family: Theme.font-ui;
-                                                    font-size: 11px;
-                                                    font-weight: 600;
-                                                    color: #FF6600;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                        }
-                                        if (root.detail-rating-imdb != "") : Rectangle {
-                                            height: 20px;
-                                            border-radius: 4px;
-                                            background: #E2B61622;
-                                            border-width: 1px;
-                                            border-color: #C79A00;
-                                            HorizontalLayout {
-                                                padding-left: 6px;
-                                                padding-right: 6px;
-                                                Text {
-                                                    text: "IMDb " + root.detail-rating-imdb;
-                                                    font-family: Theme.font-ui;
-                                                    font-size: 11px;
-                                                    font-weight: 600;
-                                                    color: #D9A404;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if (root.detail-year != "" || root.detail-country != "") : Text {
-                                        text: root.detail-year != "" && root.detail-country != ""
-                                            ? (root.detail-year + "  •  " + root.detail-country)
-                                            : (root.detail-year != "" ? root.detail-year : root.detail-country);
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: Theme.text-secondary;
-                                        wrap: word-wrap;
-                                    }
-
-                                    if (root.detail-genres != "") : Text {
-                                        text: root.detail-genres;
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: Theme.accent;
-                                        wrap: word-wrap;
-                                    }
-                                }
-                            }
-
-                            // Quick actions for selected torrent
-                            HorizontalLayout {
-                                spacing: 6px;
-                                if (root.detail-tracker-url != "") : FluentButton {
-                                    text: "🌐  Страница раздачи";
-                                    compact: true;
-                                    clicked => { root.open-tracker-page(root.selected-torrent-hash); }
-                                }
-                                FluentButton {
-                                    text: "ℹ  Подробнее";
-                                    compact: true;
-                                    clicked => { root.show-torrent-info(root.selected-torrent-hash); }
-                                }
-                            }
-
-                            // Description
-                            VerticalLayout {
-                                spacing: 4px;
-                                Text {
-                                    text: "Описание";
-                                    font-family: Theme.font-ui;
-                                    font-size: 12px;
-                                    font-weight: 600;
-                                    color: Theme.text-primary;
-                                }
-                                Text {
-                                    text: root.detail-description != ""
-                                        ? root.detail-description
-                                        : (root.detail-loading
-                                            ? "Загрузка информации из трекера, Кинопоиска / IMDb..."
-                                            : "Описание не найдено. Нажмите «↻» чтобы повторить поиск или добавьте ключ Кинопоиска в Настройках.");
-                                    font-family: Theme.font-ui;
-                                    font-size: 12px;
-                                    color: root.detail-description != "" ? Theme.text-primary : Theme.text-secondary;
-                                    wrap: word-wrap;
-                                }
-                            }
-
-                            // Screenshots / Stills
-                            if (root.detail-screenshots.length > 0) : VerticalLayout {
-                                spacing: 6px;
-                                Text {
-                                    text: "Скриншоты и кадры (нажмите для увеличения)";
-                                    font-family: Theme.font-ui;
-                                    font-size: 12px;
-                                    font-weight: 600;
-                                    color: Theme.text-primary;
-                                }
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    for shot in root.detail-screenshots : Rectangle {
-                                        width: 96px;
-                                        height: 60px;
-                                        border-radius: Theme.radius-ctrl;
-                                        border-width: 1px;
-                                        border-color: shot-ta.has-hover ? Theme.accent : Theme.border-color;
-                                        background: Theme.subtle-bg;
-                                        clip: true;
-
-                                        Image {
-                                            width: parent.width;
-                                            height: parent.height;
-                                            source: shot.img;
-                                            image-fit: cover;
-                                        }
-
-                                        shot-ta := TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => {
-                                                root.lightbox-image = shot.img;
-                                                root.lightbox-url = shot.url;
-                                                root.lightbox-visible = true;
-                                            }
-                                        }
-                                    }
-                                }
+                        row-clicked => {
+                            root.select-torrent(t.hash);
+                            if (!Win11Theme.is-desktop) {
+                                AppState.mobile-detail-open = true;
                             }
                         }
+                        row-double-clicked => { root.play-file(t.hash, -1); }
+                        row-context(ax, ay) => {
+                            root.ctx-torrent-hash = t.hash;
+                            root.ctx-x = min(ax - root.absolute-position.x, max(0px, root.width - 284px));
+                            root.ctx-y = min(ay - root.absolute-position.y, max(0px, root.height - 266px));
+                            torrent-ctx-menu.show();
+                        }
+                        more-clicked(ax, ay) => {
+                            root.ctx-torrent-hash = t.hash;
+                            root.ctx-x = min(ax - root.absolute-position.x - 240px, max(0px, root.width - 284px));
+                            root.ctx-y = min(ay - root.absolute-position.y, max(0px, root.height - 266px));
+                            torrent-ctx-menu.show();
+                        }
+                        play-clicked => { root.play-file(t.hash, -1); }
+                        playlist-clicked => { root.download-torrent-playlist(t.hash); }
+                        magnet-clicked => { root.copy-torrent-magnet(t.hash); }
+                        remove-clicked => { root.remove-torrent(t.hash); }
                     }
                 }
             }
         }
     }
 
-    // Modal Overlay: Torrent Info Card
+    // Torrent Info Modal
     if (root.torrent-info-visible) : Rectangle {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
         background: #00000080;
-
-        TouchArea {
-            clicked => { root.torrent-info-visible = false; }
-        }
-
+        TouchArea { clicked => { root.torrent-info-visible = false; } }
         FluentCard {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 560px;
-            height: 430px;
-            drop-shadow-blur: 20px;
-            drop-shadow-color: #00000066;
-
-            TouchArea { } // absorb backdrop clicks
-
+            width: min(parent.width - 24px, 520px);
+            height: min(parent.height - 24px, 400px);
+            TouchArea { }
             VerticalLayout {
-                padding: 18px;
-                spacing: 10px;
-
+                padding: 16px;
+                spacing: 8px;
                 HorizontalLayout {
-                    spacing: 10px;
                     Text {
                         horizontal-stretch: 1;
-                        text: "Информация о торренте";
-                        font-family: Theme.font-ui;
-                        font-size: 16px;
+                        text: @tr("Информация о торренте");
+                        font-family: Win11Theme.font-ui;
+                        font-size: 15px;
                         font-weight: 600;
-                        color: Theme.text-primary;
+                        color: Win11Theme.text-primary;
                         vertical-alignment: center;
                     }
-                    FluentButton {
-                        text: "✕";
-                        compact: true;
-                        clicked => { root.torrent-info-visible = false; }
-                    }
+                    FluentButton { compact: true; icon-path: "M 6 6 L 18 18 M 18 6 L 6 18"; clicked => { root.torrent-info-visible = false; } }
                 }
-
-                Rectangle { height: 1px; background: Theme.border-color; }
-
+                Rectangle { height: 1px; background: Win11Theme.border-color; }
                 sv-info := ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
                         width: sv-info.visible-width;
-                        spacing: 8px;
-
-                        Text {
-                            text: root.info-title;
-                            font-family: Theme.font-ui;
-                            font-size: 14px;
-                            font-weight: 600;
-                            color: Theme.text-primary;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: "InfoHash: " + root.info-hash;
-                            font-family: Theme.font-mono;
-                            font-size: 11px;
-                            color: Theme.accent;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: "Размер: " + root.info-size + "   •   Файлов: " + root.info-files-count;
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            color: Theme.text-primary;
-                        }
-                        Text {
-                            text: "Статус: " + root.info-status + "   •   Скорость: " + root.info-speed + "   •   Пиры/Сиды: " + root.info-peers;
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            color: Theme.text-secondary;
-                            wrap: word-wrap;
-                        }
-                        if (root.info-added != "") : Text {
-                            text: "Добавлен: " + root.info-added;
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            color: Theme.text-secondary;
-                        }
-                        if (root.info-ratings != "") : Text {
-                            text: "Рейтинги: " + root.info-ratings;
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            font-weight: 600;
-                            color: Theme.text-primary;
-                        }
-                        if (root.info-tracker-url != "") : Text {
-                            text: "Трекер: " + root.info-tracker-url;
-                            font-family: Theme.font-ui;
-                            font-size: 11px;
-                            color: Theme.accent;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: "Magnet: " + root.info-magnet;
-                            font-family: Theme.font-mono;
-                            font-size: 10px;
-                            color: Theme.text-secondary;
-                            wrap: word-wrap;
-                        }
+                        spacing: 6px;
+                        Text { text: root.info-title; font-family: Win11Theme.font-ui; font-size: 13px; font-weight: 600; color: Win11Theme.text-primary; wrap: word-wrap; }
+                        Text { text: "Hash: " + root.info-hash; font-family: Win11Theme.font-mono; font-size: 11px; color: Win11Theme.accent; wrap: word-wrap; }
+                        Text { text: root.info-size + " • " + root.info-files-count + " • " + root.info-status + " • " + root.info-speed; font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; wrap: word-wrap; }
+                        if (root.info-ratings != "") : Text { text: root.info-ratings; font-family: Win11Theme.font-ui; font-size: 11px; font-weight: 600; color: Win11Theme.text-primary; }
+                        if (root.info-tracker-url != "") : Text { text: root.info-tracker-url; font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.accent; wrap: word-wrap; }
+                        Text { text: root.info-magnet; font-family: Win11Theme.font-mono; font-size: 10px; color: Win11Theme.text-secondary; wrap: word-wrap; }
                     }
                 }
-
                 HorizontalLayout {
                     spacing: 8px;
-                    FluentButton {
-                        text: "⧉  Скопировать Magnet";
-                        primary: true;
-                        clicked => { root.copy-torrent-magnet(root.info-hash); }
-                    }
-                    if (root.info-tracker-url != "") : FluentButton {
-                        text: "🌐  Открыть на трекере";
-                        clicked => { root.open-tracker-page(root.info-hash); }
-                    }
+                    FluentButton { text: @tr("Копировать Magnet"); primary: true; clicked => { root.copy-torrent-magnet(root.info-hash); } }
+                    if (root.info-tracker-url != "") : FluentButton { text: @tr("Трекер"); clicked => { root.open-tracker-page(root.info-hash); } }
                     Rectangle { horizontal-stretch: 1; }
-                    FluentButton {
-                        text: "Закрыть";
-                        clicked => { root.torrent-info-visible = false; }
-                    }
-                }
-            }
-        }
-    }
-
-    // Lightbox Overlay for Screenshots
-    if (root.lightbox-visible) : Rectangle {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-        background: #000000AA;
-
-        TouchArea {
-            clicked => { root.lightbox-visible = false; }
-        }
-
-        FluentCard {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(parent.width - 48px, 840px);
-            height: min(parent.height - 48px, 560px);
-            drop-shadow-blur: 24px;
-            drop-shadow-color: #00000080;
-
-            TouchArea { }
-
-            VerticalLayout {
-                padding: 14px;
-                spacing: 10px;
-
-                Image {
-                    vertical-stretch: 1;
-                    source: root.lightbox-image;
-                    image-fit: contain;
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    if (root.lightbox-url != "") : FluentButton {
-                        text: "🌐  Открыть оригинал в браузере";
-                        clicked => { root.open-external-url(root.lightbox-url); }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    FluentButton {
-                        text: "Закрыть";
-                        primary: true;
-                        clicked => { root.lightbox-visible = false; }
-                    }
+                    FluentButton { text: @tr("Закрыть"); clicked => { root.torrent-info-visible = false; } }
                 }
             }
         }

@@ -1,12 +1,12 @@
 import { LineEdit, ScrollView } from "std-widgets.slint";
-import { Theme, SearchResultItem } from "../../theme.slint";
-import { FluentCard, FluentButton, FluentPill } from "../../components.slint";
+import { Win11Theme, SearchResultItem } from "../../theme.slint";
+import { FluentCard, FluentButton, FilterPill, MediaBadge } from "../../components.slint";
 
 export component SearchView inherits Rectangle {
     in-out property <string> search-query: "";
     in-out property <string> quality-filter: "ALL";
-    in-out property <int> sort-mode: 0; // 0 = Seeds, 1 = Date, 2 = Size, 3 = Title
-    in-out property <int> source-mode: 0; // 0 = All, 1 = RuTor, 2 = RuTracker, 3 = JacRed
+    in-out property <int> sort-mode: 0;
+    in-out property <int> source-mode: 0;
     in-out property <bool> loading: false;
     in-out property <string> error-text: "";
     in-out property <[SearchResultItem]> results;
@@ -22,180 +22,79 @@ export component SearchView inherits Rectangle {
     background: transparent;
 
     VerticalLayout {
-        padding: 20px;
-        spacing: 12px;
+        padding: Win11Theme.is-mobile ? 8px : 12px;
+        spacing: 8px;
 
-        // Header
-        VerticalLayout {
-            spacing: 2px;
-            Text {
-                text: "Поиск раздач";
-                font-family: Theme.font-ui;
-                font-size: 22px;
-                font-weight: 600;
-                color: Theme.text-primary;
-            }
-            Text {
-                text: "Поиск раздач по RuTor, RuTracker (через ваш аккаунт) и резервному JacRed";
-                font-family: Theme.font-ui;
-                font-size: 12px;
-                color: Theme.text-secondary;
-            }
-        }
-
-        // Search Bar Card
         FluentCard {
             VerticalLayout {
-                padding: 12px;
-                spacing: 10px;
+                padding: 10px;
+                spacing: 8px;
 
                 HorizontalLayout {
-                    spacing: 8px;
+                    spacing: 6px;
                     LineEdit {
                         horizontal-stretch: 1;
+                        height: Win11Theme.ctrl-h;
                         text <=> root.search-query;
-                        placeholder-text: "Введите название фильма, сериала или аниме...";
+                        placeholder-text: @tr("Название фильма, сериала или аниме...");
                         accepted => {
-                            if (root.search-query != "") {
-                                root.search-torrents(root.search-query);
-                            }
+                            if (root.search-query != "") { root.search-torrents(root.search-query); }
                         }
                     }
                     FluentButton {
-                        text: root.loading ? "Поиск..." : "Найти";
+                        text: root.loading ? "..." : @tr("Найти");
                         primary: true;
                         enabled: !root.loading;
+                        icon-path: "M 11 4 A 7 7 0 1 0 11 18 A 7 7 0 1 0 11 4 M 16 16 L 21 21";
                         clicked => {
-                            if (root.search-query != "") {
-                                root.search-torrents(root.search-query);
-                            }
+                            if (root.search-query != "") { root.search-torrents(root.search-query); }
                         }
                     }
                     FluentButton {
-                        text: "🔥 Топ 24ч";
+                        text: @tr("Топ 24ч");
                         enabled: !root.loading;
+                        icon-path: "M 12 3 C 15 7 18 10 18 14 A 6 6 0 1 1 6 14 C 6 11 8 9 9 7 C 10 9 11 10 12 3 Z";
                         clicked => { root.fetch-top-24h(); }
                     }
                 }
 
-                // Source pills
                 HorizontalLayout {
-                    spacing: 6px;
-                    Text {
-                        text: "Источник:";
-                        font-family: Theme.font-ui;
-                        font-size: 12px;
-                        color: Theme.text-secondary;
-                        vertical-alignment: center;
-                    }
-                    FluentPill {
-                        text: "Все";
-                        active: root.source-mode == 0;
-                        clicked => { root.set-source(0); }
-                    }
-                    FluentPill {
-                        text: "RuTor";
-                        active: root.source-mode == 1;
-                        clicked => { root.set-source(1); }
-                    }
-                    FluentPill {
-                        text: "RuTracker";
-                        active: root.source-mode == 2;
-                        clicked => { root.set-source(2); }
-                    }
-                    FluentPill {
-                        text: "JacRed";
-                        active: root.source-mode == 3;
-                        clicked => { root.set-source(3); }
+                    spacing: 5px;
+                    FilterPill { text: @tr("Все"); active: root.source-mode == 0; clicked => { root.set-source(0); } }
+                    FilterPill { text: "RuTor"; active: root.source-mode == 1; clicked => { root.set-source(1); } }
+                    FilterPill { text: "RuTracker"; active: root.source-mode == 2; clicked => { root.set-source(2); } }
+                    FilterPill { text: "JacRed"; active: root.source-mode == 3; clicked => { root.set-source(3); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if (!Win11Theme.is-mobile) : HorizontalLayout {
+                        spacing: 4px;
+                        FilterPill { text: "ALL"; active: root.quality-filter == "ALL"; clicked => { root.set-quality("ALL"); } }
+                        FilterPill { text: "1080p"; active: root.quality-filter == "1080p"; clicked => { root.set-quality("1080p"); } }
+                        FilterPill { text: "4K"; active: root.quality-filter == "4K"; clicked => { root.set-quality("4K"); } }
+                        FilterPill { text: "HDR"; active: root.quality-filter == "HDR"; clicked => { root.set-quality("HDR"); } }
                     }
                 }
 
-                // Quality pills & Sort
                 HorizontalLayout {
-                    alignment: space-between;
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: "Качество:";
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            color: Theme.text-secondary;
-                            vertical-alignment: center;
-                        }
-                        FluentPill {
-                            text: "Все";
-                            active: root.quality-filter == "ALL";
-                            clicked => { root.set-quality("ALL"); }
-                        }
-                        FluentPill {
-                            text: "1080p";
-                            active: root.quality-filter == "1080p";
-                            clicked => { root.set-quality("1080p"); }
-                        }
-                        FluentPill {
-                            text: "4K";
-                            active: root.quality-filter == "4K";
-                            clicked => { root.set-quality("4K"); }
-                        }
-                        FluentPill {
-                            text: "HDR";
-                            active: root.quality-filter == "HDR";
-                            clicked => { root.set-quality("HDR"); }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: "Сортировка:";
-                            font-family: Theme.font-ui;
-                            font-size: 12px;
-                            color: Theme.text-secondary;
-                            vertical-alignment: center;
-                        }
-                        FluentPill {
-                            text: "По сидам";
-                            active: root.sort-mode == 0;
-                            clicked => { root.set-sort(0); }
-                        }
-                        FluentPill {
-                            text: "По дате";
-                            active: root.sort-mode == 1;
-                            clicked => { root.set-sort(1); }
-                        }
-                        FluentPill {
-                            text: "По размеру";
-                            active: root.sort-mode == 2;
-                            clicked => { root.set-sort(2); }
-                        }
-                        FluentPill {
-                            text: "По названию";
-                            active: root.sort-mode == 3;
-                            clicked => { root.set-sort(3); }
-                        }
-                    }
+                    spacing: 5px;
+                    FilterPill { text: @tr("Сиды"); active: root.sort-mode == 0; clicked => { root.set-sort(0); } }
+                    FilterPill { text: @tr("Дата"); active: root.sort-mode == 1; clicked => { root.set-sort(1); } }
+                    FilterPill { text: @tr("Размер"); active: root.sort-mode == 2; clicked => { root.set-sort(2); } }
+                    FilterPill { text: @tr("Имя"); active: root.sort-mode == 3; clicked => { root.set-sort(3); } }
                 }
             }
         }
 
         if (root.error-text != "") : Rectangle {
-            border-radius: Theme.radius-card;
-            background: Theme.danger-bg;
+            border-radius: Win11Theme.radius-ctrl;
+            background: Win11Theme.danger-bg;
             border-width: 1px;
-            border-color: Theme.danger;
+            border-color: Win11Theme.status-err;
             HorizontalLayout {
-                padding: 10px;
-                Text {
-                    text: root.error-text;
-                    font-family: Theme.font-ui;
-                    font-size: 12px;
-                    color: Theme.danger;
-                    wrap: word-wrap;
-                }
+                padding: 8px;
+                Text { text: root.error-text; font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.status-err; wrap: word-wrap; }
             }
         }
 
-        // Results Card
         FluentCard {
             vertical-stretch: 1;
             clip: true;
@@ -204,25 +103,19 @@ export component SearchView inherits Rectangle {
                 alignment: center;
                 spacing: 8px;
                 Text {
-                    text: root.loading ? "Выполняется загрузка раздач с трекеров..." : "Нет результатов для отображения";
-                    font-family: Theme.font-ui;
-                    font-size: 14px;
+                    text: root.loading ? @tr("Загрузка раздач с трекеров...") : @tr("Введите запрос или откройте Топ 24ч");
+                    font-family: Win11Theme.font-ui;
+                    font-size: 13px;
                     font-weight: 600;
-                    color: Theme.text-primary;
-                    horizontal-alignment: center;
-                }
-                Text {
-                    text: "Введите запрос в строку выше и нажмите «Найти» или откройте популярные раздачи";
-                    font-family: Theme.font-ui;
-                    font-size: 12px;
-                    color: Theme.text-secondary;
+                    color: Win11Theme.text-primary;
                     horizontal-alignment: center;
                 }
                 HorizontalLayout {
                     alignment: center;
                     FluentButton {
-                        text: "🔥 Показать популярное за 24 часа";
+                        text: @tr("Показать Топ 24ч");
                         enabled: !root.loading;
+                        icon-path: "M 12 3 C 15 7 18 10 18 14 A 6 6 0 1 1 6 14 C 6 11 8 9 9 7 C 10 9 11 10 12 3 Z";
                         clicked => { root.fetch-top-24h(); }
                     }
                 }
@@ -231,107 +124,63 @@ export component SearchView inherits Rectangle {
             if (root.results.length > 0) : sv-search := ScrollView {
                 VerticalLayout {
                     width: sv-search.visible-width;
-                    padding: 8px;
-                    spacing: 6px;
+                    padding: 6px;
+                    spacing: 4px;
 
                     for res in root.results : Rectangle {
-                        border-radius: Theme.radius-ctrl;
+                        border-radius: Win11Theme.radius-ctrl;
                         border-width: 1px;
-                        border-color: Theme.border-color;
-                        background: res-ta.has-hover ? Theme.card-hover : Theme.subtle-bg;
-
-                        res-ta := TouchArea {
-                            mouse-cursor: default;
-                        }
+                        border-color: Win11Theme.border-color;
+                        background: res-ta.has-hover ? Win11Theme.card-hover : Win11Theme.subtle-bg;
+                        res-ta := TouchArea { mouse-cursor: default; }
 
                         HorizontalLayout {
-                            padding: 10px;
-                            spacing: 12px;
-
+                            padding: 8px;
+                            spacing: 8px;
                             VerticalLayout {
                                 horizontal-stretch: 1;
                                 spacing: 4px;
-
                                 Text {
                                     text: res.title;
-                                    font-family: Theme.font-ui;
-                                    font-size: 13px;
+                                    font-family: Win11Theme.font-ui;
+                                    font-size: 12px;
                                     font-weight: 600;
-                                    color: Theme.text-primary;
+                                    color: Win11Theme.text-primary;
                                     overflow: elide;
                                 }
-
                                 HorizontalLayout {
-                                    spacing: 12px;
-                                    Rectangle {
-                                        height: 18px;
-                                        border-radius: 4px;
-                                        background: Theme.badge-bg;
-                                        HorizontalLayout {
-                                            padding-left: 6px;
-                                            padding-right: 6px;
-                                            Text {
-                                                text: res.tracker;
-                                                font-family: Theme.font-ui;
-                                                font-size: 11px;
-                                                color: Theme.text-secondary;
-                                                vertical-alignment: center;
-                                            }
-                                        }
+                                    spacing: 8px;
+                                    MediaBadge { text: res.tracker; }
+                                    if (res.quality != "") : MediaBadge {
+                                        text: res.quality;
+                                        badge-bg: Win11Theme.info-bg;
+                                        text-color: Win11Theme.accent;
                                     }
-                                    if (res.quality != "") : Rectangle {
-                                        height: 18px;
-                                        border-radius: 4px;
-                                        background: Theme.info-bg;
-                                        HorizontalLayout {
-                                            padding-left: 6px;
-                                            padding-right: 6px;
-                                            Text {
-                                                text: res.quality;
-                                                font-family: Theme.font-ui;
-                                                font-size: 11px;
-                                                font-weight: 600;
-                                                color: Theme.accent;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
+                                    Text { text: res.size-text; font-family: Win11Theme.font-mono; font-size: 10px; color: Win11Theme.text-secondary; vertical-alignment: center; }
+                                    if (res.date-text != "") : Text { text: res.date-text; font-family: Win11Theme.font-ui; font-size: 10px; color: Win11Theme.text-secondary; vertical-alignment: center; }
                                     Text {
-                                        text: "Размер: " + res.size-text;
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: Theme.text-secondary;
-                                        vertical-alignment: center;
-                                    }
-                                    if (res.date-text != "") : Text {
-                                        text: res.date-text;
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: Theme.text-secondary;
-                                        vertical-alignment: center;
-                                    }
-                                    Text {
-                                        text: "Сиды: " + res.seeds + "  |  Пиры: " + res.peers;
-                                        font-family: Theme.font-ui;
-                                        font-size: 11px;
-                                        color: res.seeds > 5 ? Theme.success : Theme.text-secondary;
+                                        text: "S:" + res.seeds + " / P:" + res.peers;
+                                        font-family: Win11Theme.font-mono;
+                                        font-size: 10px;
+                                        color: res.seeds > 5 ? Win11Theme.status-ok : Win11Theme.text-secondary;
                                         vertical-alignment: center;
                                     }
                                 }
                             }
-
                             HorizontalLayout {
                                 alignment: center;
-                                spacing: 6px;
+                                spacing: 4px;
                                 FluentButton {
-                                    text: "+ В раздачи";
                                     compact: true;
+                                    text: Win11Theme.is-mobile ? "" : @tr("В раздачи");
+                                    icon-path: "M 12 5 L 12 19 M 5 12 L 19 12";
                                     clicked => { root.add-search-result(res.magnet, res.title, res.page-url); }
                                 }
                                 FluentButton {
-                                    text: "▶ Смотреть";
                                     compact: true;
                                     primary: true;
+                                    text: Win11Theme.is-mobile ? "" : @tr("Смотреть");
+                                    icon-path: "M 7 5 L 19 12 L 7 19 Z";
                                     clicked => { root.play-search-result(res.magnet, res.title, res.page-url); }
                                 }
                             }

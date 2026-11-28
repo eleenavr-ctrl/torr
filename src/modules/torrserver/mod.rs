@@ -5,12 +5,18 @@ pub mod player;
 pub mod rutracker;
 pub mod rutracker_webview;
 pub mod server_manager;
+pub mod ui_adapter;
 
-use crate::core;
 use crate::core::diagnostics;
 use crate::core::storage::{
     save_config, AppConfig, PortablePaths, SavedTorrentTask, TorrServerConfig, TorrentOriginMeta,
 };
+use crate::modules::torrserver::ui_adapter::{
+    build_ui_file_item, build_ui_torrent_item, matches_filter, update_telemetry_and_counters,
+    watch_trailer,
+};
+use crate::platform::windows::open_url_in_browser;
+use crate::ui_bridge::show_toast;
 use crate::modules::torrserver::api::{
     extract_torrent_comment_url, format_bytes, format_speed, format_unix_datetime_short,
     parse_backup_json, ApiSearchResult, ApiTorrent, TorrentBackupItem, TorrServerApi,
@@ -37,7 +43,7 @@ use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Shar
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -71,6 +77,7 @@ struct TorrServerShared {
     last_status: Mutex<ModuleStatus>,
     last_list_err_log: Mutex<Option<Instant>>,
     clipboard: Mutex<Option<ClipboardWatcher>>,
+    filter_mode: AtomicI32,
 }
 
 impl TorrServerShared {
@@ -104,7 +111,7 @@ impl TorrServerShared {
                 let weak_c = weak.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(app) = weak_c.upgrade() {
-                        core::show_toast(&app, msg);
+                        show_toast(&app, msg);
                     }
                 });
             }
@@ -156,6 +163,7 @@ impl TorrServerModule {
             last_status: Mutex::new(ModuleStatus::default()),
             last_list_err_log: Mutex::new(None),
             clipboard: Mutex::new(None),
+            filter_mode: AtomicI32::new(0),
         });
 
         Self { shared }
@@ -318,6 +326,7 @@ impl AppModule for TorrServerModule {
             );
         }
 
+        apply_addresses_to_window(&cfg, ui);
         sync_releases_to_ui(&self.shared, ui);
         sync_players_to_ui(&self.shared, ui);
         sync_history_to_ui(&self.shared, ui);
@@ -663,7 +672,7 @@ impl AppModule for TorrServerModule {
                 let h = hash.to_string();
                 let cfg = shared.ts_config();
                 if let Some(url) = resolve_tracker_url(&shared, &cfg, &h) {
-                    core::open_url_in_browser(&url);
+                    open_url_in_browser(&url);
                 } else {
                     shared.toast("Страница на трекере не найдена (раздача добавлена без ссылки на тему)");
                 }
@@ -686,8 +695,15 @@ impl AppModule for TorrServerModule {
             ui.on_open_external_url(move |url| {
                 let u = url.trim();
                 if u.starts_with("http://") || u.starts_with("https://") {
-                    core::open_url_in_browser(u);
+                    open_url_in_browser(u);
                 }
+            });
+        }
+
+        // 8h. Watch trailer search in browser
+        {
+            ui.on_watch_trailer(move |_hash, title| {
+                watch_trailer(&title);
             });
         }
 
@@ -765,6 +781,13 @@ impl AppModule for TorrServerModule {
                 if let Some(app) = weak.upgrade() {
                     app.set_torrents_sort_mode(mode);
                 }
+                push_torrents_to_ui(&shared);
+            });
+        }
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_set_torrents_filter(move |mode| {
+                shared.filter_mode.store(mode, Ordering::Relaxed);
                 push_torrents_to_ui(&shared);
             });
         }
@@ -1123,6 +1146,8 @@ impl AppModule for TorrServerModule {
                         c.keep_engine_on_exit = keep_on_exit;
                         c.kinopoisk_api_key = kp_key;
                     });
+                    let updated_cfg = shared.ts_config();
+                    apply_addresses_to_window(&updated_cfg, &app);
                     let s = Arc::clone(&shared);
                     thread::spawn(move || {
                         let cfg = s.ts_config();
@@ -1276,7 +1301,7 @@ impl AppModule for TorrServerModule {
                                     app.set_engine_missing(!final_exists);
                                     app.set_engine_update_progress(if ok { 1.0 } else { 0.0 });
                                     app.set_engine_update_status(msg.clone().into());
-                                    core::show_toast(&app, msg);
+                                    show_toast(&app, msg);
                                 }
                             });
                             if ok {
@@ -1317,7 +1342,7 @@ impl AppModule for TorrServerModule {
                                             app.set_engine_update_status(
                                                 "Локальный движок установлен и запущен".into(),
                                             );
-                                            core::show_toast(
+                                            show_toast(
                                                 &app,
                                                 "Движок TorrServer установлен и запущен",
                                             );
@@ -1342,7 +1367,63 @@ impl AppModule for TorrServerModule {
             let shared = Arc::clone(&self.shared);
             ui.on_open_web_panel(move || {
                 let url = shared.ts_config().effective_base_url();
-                core::open_url_in_browser(&url);
+                open_url_in_browser(&url);
+            });
+        }
+
+        // 20a. Copy Browser / Lampa URLs & refresh LAN IP
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_copy_ts_browser_url(move || {
+                let (browser_url, _, _) = resolve_ts_addresses(&shared.ts_config());
+                match arboard::Clipboard::new() {
+                    Ok(mut cb) => {
+                        if cb.set_text(browser_url.clone()).is_ok() {
+                            shared.toast(format!("Адрес скопирован: {browser_url}"));
+                        } else {
+                            shared.toast("Не удалось записать адрес в буфер обмена");
+                        }
+                    }
+                    Err(_) => {
+                        shared.toast("Буфер обмена недоступен");
+                    }
+                }
+            });
+        }
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_copy_ts_lan_url(move || {
+                let cfg = shared.ts_config();
+                let (_, lan_url, has_lan) = resolve_ts_addresses(&cfg);
+                if !has_lan {
+                    sync_addresses_to_ui(&shared);
+                    shared.toast("Локальный IP сети не определён — проверьте подключение к Wi-Fi/LAN");
+                    return;
+                }
+                match arboard::Clipboard::new() {
+                    Ok(mut cb) => {
+                        if cb.set_text(lan_url.clone()).is_ok() {
+                            shared.toast(format!("Адрес для Lampa скопирован: {lan_url}"));
+                        } else {
+                            shared.toast("Не удалось записать адрес в буфер обмена");
+                        }
+                    }
+                    Err(_) => {
+                        shared.toast("Буфер обмена недоступен");
+                    }
+                }
+            });
+        }
+        {
+            let shared = Arc::clone(&self.shared);
+            ui.on_refresh_ts_addresses(move || {
+                sync_addresses_to_ui(&shared);
+                let (browser_url, lan_url, has_lan) = resolve_ts_addresses(&shared.ts_config());
+                if has_lan {
+                    shared.toast(format!("Адреса обновлены: {lan_url}"));
+                } else {
+                    shared.toast(format!("Адреса обновлены: {browser_url}"));
+                }
             });
         }
 
@@ -1414,7 +1495,7 @@ impl AppModule for TorrServerModule {
                 }
                 if let Some(app) = weak.upgrade() {
                     sync_players_to_ui(&shared, &app);
-                    core::show_toast(&app, "Поиск видеоплееров завершён");
+                    show_toast(&app, "Поиск видеоплееров завершён");
                 }
             });
         }
@@ -1468,7 +1549,7 @@ impl AppModule for TorrServerModule {
                             watcher.set_enabled(clip_watch);
                         }
                     }
-                    core::show_toast(&app, "Настройки плеера и буфера сохранены");
+                    show_toast(&app, "Настройки плеера и буфера сохранены");
                 }
             });
         }
@@ -1524,7 +1605,7 @@ impl AppModule for TorrServerModule {
                                     if let Some(app) = w_c.upgrade() {
                                         app.set_rt_testing(false);
                                         app.set_rt_auth_status(status_msg.clone().into());
-                                        core::show_toast(&app, if ok {
+                                        show_toast(&app, if ok {
                                             "RuTracker: вход выполнен"
                                         } else {
                                             status_msg.as_str()
@@ -1574,7 +1655,7 @@ impl AppModule for TorrServerModule {
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(app) = w_inner.upgrade() {
                                     app.set_rt_auth_status(status_msg.clone().into());
-                                    core::show_toast(&app, status_msg);
+                                    show_toast(&app, status_msg);
                                 }
                             });
                         });
@@ -1583,7 +1664,7 @@ impl AppModule for TorrServerModule {
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(app) = w_outer.upgrade() {
                                     app.set_rt_auth_status(e.clone().into());
-                                    core::show_toast(&app, e);
+                                    show_toast(&app, e);
                                 }
                             });
                         }
@@ -1601,6 +1682,7 @@ impl AppModule for TorrServerModule {
             }
         }
         if visible {
+            sync_addresses_to_ui(&self.shared);
             let s = Arc::clone(&self.shared);
             thread::spawn(move || {
                 refresh_torrents_and_status(&s);
@@ -1694,7 +1776,7 @@ impl AppModule for TorrServerModule {
             }
             "open_web_panel" => {
                 let url = self.shared.ts_config().effective_base_url();
-                core::open_url_in_browser(&url);
+                open_url_in_browser(&url);
                 true
             }
             "priority_high" => {
@@ -2384,33 +2466,20 @@ fn push_torrents_to_ui(shared: &Arc<TorrServerShared>) {
         })
         .unwrap_or_default();
     let binary_missing = !shared.server.binary_exists();
+    let links_map = shared
+        .torrents_links
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_default();
+    let active_filter = shared.filter_mode.load(Ordering::Relaxed);
 
     let ui_torrents: Vec<TorrentItem> = torrents
         .iter()
+        .filter(|t| matches_filter(t, active_filter))
         .map(|t| {
-            let progress = if t.torrent_size > 0 {
-                (t.loaded_size as f64 / t.torrent_size as f64) as f32
-            } else {
-                0.0
-            };
             let added_ts = ts_for(t);
             let added_text = format_unix_datetime_short(added_ts);
-            TorrentItem {
-                hash: t.hash.clone().into(),
-                title: t.display_title().into(),
-                size_text: format_bytes(t.torrent_size).into(),
-                speed_text: format_speed(t.download_speed).into(),
-                peers_text: format!("{} / {}", t.active_peers, t.connected_seeders).into(),
-                progress,
-                status_text: if t.stat_string.is_empty() {
-                    "Активен".into()
-                } else {
-                    t.stat_string.clone().into()
-                },
-                added_text: added_text.into(),
-                magnet: format!("magnet:?xt=urn:btih:{}", t.hash).into(),
-                is_selected: t.hash == selected,
-            }
+            build_ui_torrent_item(t, added_text, &selected, &links_map)
         })
         .collect();
 
@@ -2429,16 +2498,16 @@ fn push_torrents_to_ui(shared: &Arc<TorrServerShared>) {
                 .unwrap_or(&f.path)
                 .to_string();
             let stream = api.stream_url(&sel_t.hash, f.id, &file_name);
-            ui_files.push(TorrentFileItem {
-                id: f.id,
-                index: idx as i32,
-                name: file_name.into(),
-                path: f.path.into(),
-                size_text: format_bytes(f.length).into(),
-                stream_url: stream.into(),
-                is_video: is_vid,
-                is_watched: watched_ids.contains(&f.id),
-            });
+            ui_files.push(build_ui_file_item(
+                f.id,
+                idx as i32,
+                file_name,
+                f.path,
+                f.length,
+                stream,
+                is_vid,
+                watched_ids.contains(&f.id),
+            ));
         }
     }
 
@@ -2447,8 +2516,17 @@ fn push_torrents_to_ui(shared: &Arc<TorrServerShared>) {
             let w_c = weak.clone();
             let sel_hash = selected;
             let sort_mode = cfg.torrents_sort_mode;
+            let torrents_snapshot = torrents;
+            let ts_cfg_snap = cfg;
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(app) = w_c.upgrade() {
+                    update_telemetry_and_counters(
+                        &app,
+                        &torrents_snapshot,
+                        &sel_hash,
+                        &ts_cfg_snap,
+                        status.healthy,
+                    );
                     app.set_torrents(ModelRc::from(Rc::new(VecModel::from(ui_torrents))));
                     app.set_torrents_sort_mode(sort_mode);
                     app.set_selected_torrent_hash(sel_hash.into());
@@ -3507,3 +3585,67 @@ fn load_torrent_details_async(shared: &Arc<TorrServerShared>, hash: &str, force_
         })
         .ok();
 }
+
+fn detect_local_lan_ip() -> Option<String> {
+    use std::net::{IpAddr, UdpSocket};
+    let probes = [
+        "8.8.8.8:80",
+        "1.1.1.1:80",
+        "192.168.1.1:80",
+        "192.168.0.1:80",
+        "10.0.0.1:80",
+        "172.16.0.1:80",
+    ];
+    for target in probes {
+        if let Ok(sock) = UdpSocket::bind("0.0.0.0:0") {
+            if sock.connect(target).is_ok() {
+                if let Ok(local) = sock.local_addr() {
+                    if let IpAddr::V4(v4) = local.ip() {
+                        if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local() {
+                            return Some(v4.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn resolve_ts_addresses(cfg: &TorrServerConfig) -> (String, String, bool) {
+    let browser_url = cfg.effective_base_url();
+    if cfg.mode == 1 {
+        let has_remote = !browser_url.is_empty();
+        (browser_url.clone(), browser_url, has_remote)
+    } else if let Some(ip) = detect_local_lan_ip() {
+        (browser_url, format!("http://{ip}:{}", cfg.port), true)
+    } else {
+        (
+            browser_url,
+            "Локальный IP не определён (проверьте сеть)".to_string(),
+            false,
+        )
+    }
+}
+
+fn apply_addresses_to_window(cfg: &TorrServerConfig, app: &AppWindow) {
+    let (browser_url, lan_url, has_lan) = resolve_ts_addresses(cfg);
+    app.set_ts_browser_url(browser_url.into());
+    app.set_ts_lan_url(lan_url.into());
+    app.set_ts_has_lan_ip(has_lan);
+}
+
+fn sync_addresses_to_ui(shared: &Arc<TorrServerShared>) {
+    let cfg = shared.ts_config();
+    if let Ok(guard) = shared.ui_weak.lock() {
+        if let Some(weak) = guard.as_ref() {
+            let w_c = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(app) = w_c.upgrade() {
+                    apply_addresses_to_window(&cfg, &app);
+                }
+            });
+        }
+    }
+}
+

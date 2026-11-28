@@ -1,0 +1,109 @@
+import { ScrollView } from "std-widgets.slint";
+import { Win11Theme } from "theme.slint";
+import { AppState } from "globals.slint";
+import { FluentCard, FluentButton, StatTile } from "components.slint";
+
+export component DiagnosticsPanel inherits FluentCard {
+    in property <string> app-version: "0.2.0";
+    in property <string> engine-version: "-";
+    in property <string> binary-status: "-";
+    in property <string> port-status: "-";
+    in property <string> api-ping: "-";
+    in property <string> problem-hint: "Всё работает штатно";
+    in property <bool> has-problem: false;
+
+    callback run-diagnostics-now();
+    callback copy-diagnostics-report();
+    callback copy-diagnostics-for-ai();
+    callback clear-diagnostics-logs();
+
+    clip: true;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        Text {
+            text: @tr("Диагностика системы");
+            font-family: Win11Theme.font-ui;
+            font-size: 13px;
+            font-weight: 600;
+            color: Win11Theme.text-primary;
+        }
+
+        // 4 compact stat cards (2x2 grid so it fits nicely in 320px right panel)
+        HorizontalLayout {
+            spacing: 6px;
+            StatTile { horizontal-stretch: 1; label: @tr("Версия ПО"); value: "v" + root.app-version; }
+            StatTile { horizontal-stretch: 1; label: @tr("Движок"); value: root.engine-version; }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            StatTile { horizontal-stretch: 1; label: @tr("Порт"); value: root.port-status; }
+            StatTile { horizontal-stretch: 1; label: "API Ping"; value: root.api-ping; }
+        }
+
+        // Diagnosis explanation banner
+        Rectangle {
+            border-radius: Win11Theme.radius-ctrl;
+            background: root.has-problem ? Win11Theme.danger-bg : Win11Theme.info-bg;
+            border-width: 1px;
+            border-color: root.has-problem ? Win11Theme.status-err : Win11Theme.accent;
+            VerticalLayout {
+                padding: 8px;
+                spacing: 2px;
+                Text {
+                    text: root.problem-hint;
+                    font-family: Win11Theme.font-ui;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: root.has-problem ? Win11Theme.status-err : Win11Theme.text-primary;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.binary-status;
+                    font-family: Win11Theme.font-ui;
+                    font-size: 10px;
+                    color: Win11Theme.text-secondary;
+                    overflow: elide;
+                }
+            }
+        }
+
+        // Action buttons
+        HorizontalLayout {
+            spacing: 4px;
+            FluentButton { compact: true; primary: true; text: @tr("Проверить"); clicked => { root.run-diagnostics-now(); } }
+            FluentButton { compact: true; text: @tr("Скопировать отчёт"); clicked => { root.copy-diagnostics-report(); } }
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            FluentButton { horizontal-stretch: 1; compact: true; text: @tr("Скопировать для ИИ"); clicked => { root.copy-diagnostics-for-ai(); } }
+            FluentButton { compact: true; text: @tr("Очистить"); clicked => { root.clear-diagnostics-logs(); } }
+        }
+
+        // Live console log
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: Win11Theme.radius-ctrl;
+            background: Win11Theme.log-bg;
+            border-width: 1px;
+            border-color: Win11Theme.border-color;
+            clip: true;
+            sv-logs := ScrollView {
+                VerticalLayout {
+                    width: sv-logs.visible-width;
+                    padding: 6px;
+                    spacing: 2px;
+                    for entry in AppState.diag-logs : Text {
+                        text: "[" + entry.timestamp + "] [" + entry.level + "] " + entry.tag + " " + entry.message;
+                        font-family: Win11Theme.font-mono;
+                        font-size: 10px;
+                        wrap: word-wrap;
+                        color: entry.level == "ERROR" ? Win11Theme.status-err : (entry.level == "WARN" ? Win11Theme.status-warn : Win11Theme.text-primary);
+                    }
+                }
+            }
+        }
+    }
+}

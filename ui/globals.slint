@@ -1,0 +1,61 @@
+import {
+    TorrentItem,
+    TorrentFileItem,
+    SearchResultItem,
+    ScreenshotItem,
+    HistoryItem,
+    LogEntry,
+    ModuleListItem,
+    PeerItem,
+    SpeedSample,
+    WorkspaceBlockItem
+} from "theme.slint";
+
+// Single Source of Truth shared across MainWindow, DetachedWindow, and WorkspaceBuilder
+export global AppState {
+    // Active navigation & panels
+    in-out property <int> active-tab: 0; // 0=Torrents, 1=Search, 2=History, 3=Settings, 4=Workspace
+    in-out property <bool> mobile-drawer-open: false;
+    in-out property <bool> mobile-detail-open: false;
+    in-out property <int> detail-tab: 0; // 0=Overview, 1=Files, 2=Frames, 3=Peers
+
+    // Live Telemetry Strip & Sidebar Mini-Telemetry
+    in-out property <string> telemetry-down-speed: "0 KB/s";
+    in-out property <string> telemetry-up-speed: "0 KB/s";
+    in-out property <string> telemetry-cache-usage: "0 / 64 МБ";
+    in-out property <int> telemetry-buffer-pct: 0;
+    in-out property <string> telemetry-ping: "—";
+    in-out property <string> telemetry-cpu: "0%";
+    in-out property <string> telemetry-ram: "0 МБ";
+    in-out property <string> telemetry-dht: "DHT: —";
+
+    // Filter counters for Torrents View
+    in-out property <int> filter-mode: 0; // 0=All, 1=Active, 2=4K/HDR, 3=Series, 4=Completed
+    in-out property <int> count-all: 0;
+    in-out property <int> count-active: 0;
+    in-out property <int> count-4k: 0;
+    in-out property <int> count-series: 0;
+    in-out property <int> count-completed: 0;
+
+    // Portable / Sync / Language status
+    in-out property <bool> data-read-only: false;
+    in-out property <string> data-dir-path: "UserData";
+    in-out property <string> sync-status-text: "Синхр.: выкл.";
+    in-out property <int> app-lang: 0; // 0=ru, 1=en
+
+    // Torrents & Media Detail Models
+    in-out property <[TorrentItem]> torrents;
+    in-out property <[TorrentFileItem]> selected-files;
+    in-out property <[SearchResultItem]> search-results;
+    in-out property <[HistoryItem]> history-items;
+    in-out property <[LogEntry]> diag-logs;
+    in-out property <[ModuleListItem]> registered-modules;
+    in-out property <[PeerItem]> detail-peers;
+    in-out property <[SpeedSample]> detail-speed-history;
+    in-out property <string> detail-trailer-url: "";
+
+    // Workspace Builder
+    in-out property <[WorkspaceBlockItem]> workspace-blocks;
+    in-out property <[string]> workspace-presets;
+    in-out property <int> workspace-selected-preset: 0;
+}

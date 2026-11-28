@@ -1,0 +1,193 @@
+import { Palette } from "std-widgets.slint";
+import { Win11Theme } from "theme.slint";
+import { AppState } from "globals.slint";
+import { FluentButton } from "components.slint";
+import { TorrentsView } from "modules/torrserver/torrents_view.slint";
+import { SearchView } from "modules/torrserver/search_view.slint";
+import { HistoryView } from "modules/torrserver/history_view.slint";
+import { WorkspaceBuilderView } from "workspace_builder.slint";
+
+export component DetachedWindow inherits Window {
+    title: "TorrServerUI — " + (root.detached-tab == 0 ? @tr("Раздачи") : (root.detached-tab == 1 ? @tr("Поиск") : (root.detached-tab == 2 ? @tr("История") : @tr("Конструктор"))));
+    min-width: 520px;
+    min-height: 440px;
+    preferred-width: 820px;
+    preferred-height: 600px;
+    background: Win11Theme.window-bg;
+
+    in property <image> app-icon;
+    icon: root.app-icon;
+    in-out property <int> detached-tab: 0; // 0=Torrents, 1=Search, 2=History, 4=Workspace
+
+    // Mirrored shared view properties
+    in-out property <string> magnet-input: "";
+    in-out property <int> torrents-sort-mode: 0;
+    in-out property <string> selected-torrent-hash: "";
+    in-out property <bool> engine-missing: false;
+    in-out property <bool> engine-updating: false;
+    in-out property <string> engine-update-status: "";
+    in-out property <float> engine-update-progress: 0.0;
+    in-out property <[string]> engine-version-presets;
+    in-out property <int> engine-version-selected-idx: 0;
+    in-out property <bool> engine-versions-loading: false;
+    in-out property <bool> is-remote-mode: false;
+    in-out property <bool> status-healthy: false;
+
+    in-out property <string> search-query: "";
+    in-out property <string> search-quality-filter: "ALL";
+    in-out property <int> search-sort-mode: 0;
+    in-out property <int> search-source-mode: 0;
+    in-out property <bool> search-loading: false;
+    in-out property <string> search-error: "";
+    in-out property <bool> history-only-favorites: false;
+
+    callback dock-back();
+    callback add-magnet(string);
+    callback paste-and-add-magnet();
+    callback pick-torrent-file();
+    callback select-torrent(string);
+    callback refresh-torrents();
+    callback set-torrents-sort(int);
+    callback set-torrents-filter(int);
+    callback drop-torrent(string);
+    callback remove-torrent(string);
+    callback copy-torrent-magnet(string);
+    callback play-file(string, int);
+    callback select-engine-version(int);
+    callback refresh-engine-versions();
+    callback download-update-engine();
+    callback pick-engine-exe();
+    callback export-torrents();
+    callback import-torrents();
+    callback download-torrent-playlist(string);
+    callback download-all-playlist();
+    callback refresh-single-torrent(string);
+    callback show-torrent-info(string);
+    callback open-tracker-page(string);
+
+    callback search-torrents(string);
+    callback fetch-top-24h();
+    callback set-search-quality(string);
+    callback set-search-sort(int);
+    callback set-search-source(int);
+    callback add-search-result(string, string, string);
+    callback play-search-result(string, string, string);
+
+    callback toggle-history-favorites(bool);
+    callback play-history-item(string, string);
+    callback toggle-history-favorite(string);
+    callback remove-history-item(string);
+
+    callback ws-load-preset(int);
+    callback ws-save-preset(string);
+    callback ws-delete-preset(int);
+    callback ws-set-block-span(string, int);
+    callback ws-move-block(string, int);
+
+    public function sync-palette(mode: int, sys-dark: bool) {
+        if (mode == 1) { Palette.color-scheme = ColorScheme.light; }
+        else if (mode == 2) { Palette.color-scheme = ColorScheme.dark; }
+        else { Palette.color-scheme = sys-dark ? ColorScheme.dark : ColorScheme.light; }
+    }
+
+    VerticalLayout {
+        Rectangle {
+            height: 36px;
+            background: Win11Theme.sidebar-bg;
+            border-width: 1px;
+            border-color: Win11Theme.border-color;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 10px;
+                spacing: 8px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.title;
+                    font-family: Win11Theme.font-ui;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: Win11Theme.text-primary;
+                    vertical-alignment: center;
+                }
+                FluentButton {
+                    compact: true;
+                    primary: true;
+                    text: @tr("Вернуть в окно");
+                    clicked => { root.dock-back(); }
+                }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            if (root.detached-tab == 0) : TorrentsView {
+                magnet-input <=> root.magnet-input;
+                torrents: AppState.torrents;
+                torrents-sort-mode <=> root.torrents-sort-mode;
+                selected-torrent-hash: root.selected-torrent-hash;
+                engine-missing: root.engine-missing;
+                engine-updating: root.engine-updating;
+                engine-update-status: root.engine-update-status;
+                engine-update-progress: root.engine-update-progress;
+                engine-version-presets: root.engine-version-presets;
+                engine-version-selected-idx <=> root.engine-version-selected-idx;
+                engine-versions-loading: root.engine-versions-loading;
+                is-remote-mode: root.is-remote-mode;
+                status-healthy: root.status-healthy;
+                add-magnet(m) => { root.add-magnet(m); }
+                paste-and-add-magnet => { root.paste-and-add-magnet(); }
+                pick-torrent-file => { root.pick-torrent-file(); }
+                select-torrent(h) => { root.select-torrent(h); }
+                refresh-torrents => { root.refresh-torrents(); }
+                set-torrents-sort(m) => { root.set-torrents-sort(m); }
+                set-torrents-filter(f) => { root.set-torrents-filter(f); }
+                drop-torrent(h) => { root.drop-torrent(h); }
+                remove-torrent(h) => { root.remove-torrent(h); }
+                copy-torrent-magnet(h) => { root.copy-torrent-magnet(h); }
+                play-file(h, fid) => { root.play-file(h, fid); }
+                select-engine-version(i) => { root.select-engine-version(i); }
+                refresh-engine-versions => { root.refresh-engine-versions(); }
+                download-update-engine => { root.download-update-engine(); }
+                pick-engine-exe => { root.pick-engine-exe(); }
+                export-torrents => { root.export-torrents(); }
+                import-torrents => { root.import-torrents(); }
+                download-torrent-playlist(h) => { root.download-torrent-playlist(h); }
+                download-all-playlist => { root.download-all-playlist(); }
+                refresh-single-torrent(h) => { root.refresh-single-torrent(h); }
+                show-torrent-info(h) => { root.show-torrent-info(h); }
+                open-tracker-page(h) => { root.open-tracker-page(h); }
+            }
+            if (root.detached-tab == 1) : SearchView {
+                search-query <=> root.search-query;
+                quality-filter: root.search-quality-filter;
+                sort-mode: root.search-sort-mode;
+                source-mode: root.search-source-mode;
+                loading: root.search-loading;
+                error-text: root.search-error;
+                results: AppState.search-results;
+                search-torrents(q) => { root.search-torrents(q); }
+                fetch-top-24h => { root.fetch-top-24h(); }
+                set-quality(q) => { root.set-search-quality(q); }
+                set-sort(s) => { root.set-search-sort(s); }
+                set-source(src) => { root.set-search-source(src); }
+                add-search-result(m, t, u) => { root.add-search-result(m, t, u); }
+                play-search-result(m, t, u) => { root.play-search-result(m, t, u); }
+            }
+            if (root.detached-tab == 2) : HistoryView {
+                only-favorites <=> root.history-only-favorites;
+                items: AppState.history-items;
+                toggle-favorites-filter(v) => { root.toggle-history-favorites(v); }
+                play-history-item(h, m) => { root.play-history-item(h, m); }
+                toggle-favorite(h) => { root.toggle-history-favorite(h); }
+                remove-history-item(h) => { root.remove-history-item(h); }
+            }
+            if (root.detached-tab == 4) : WorkspaceBuilderView {
+                load-preset(i) => { root.ws-load-preset(i); }
+                save-preset(n) => { root.ws-save-preset(n); }
+                delete-preset(i) => { root.ws-delete-preset(i); }
+                set-block-span(id, s) => { root.ws-set-block-span(id, s); }
+                move-block(id, d) => { root.ws-move-block(id, d); }
+            }
+        }
+    }
+}

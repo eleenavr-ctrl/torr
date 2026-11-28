@@ -1,0 +1,106 @@
+import { ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Win11Theme } from "theme.slint";
+import { AppState } from "globals.slint";
+import { FluentCard, FluentButton } from "components.slint";
+
+export component WorkspaceBuilderView inherits Rectangle {
+    in-out property <string> new-preset-name: "Стандартный";
+
+    callback load-preset(int);
+    callback save-preset(string);
+    callback delete-preset(int);
+    callback set-block-span(string, int);
+    callback move-block(string, int); // -1=up/left, 1=down/right
+
+    background: transparent;
+
+    VerticalLayout {
+        padding: Win11Theme.is-mobile ? 8px : 12px;
+        spacing: 8px;
+
+        FluentCard {
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: @tr("Конструктор рабочего пространства");
+                        font-family: Win11Theme.font-ui;
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: Win11Theme.text-primary;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    ComboBox {
+                        width: 150px;
+                        model: AppState.workspace-presets;
+                        current-index <=> AppState.workspace-selected-preset;
+                        selected => { root.load-preset(self.current-index); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit { horizontal-stretch: 1; text <=> root.new-preset-name; placeholder-text: @tr("Имя пресета..."); }
+                    FluentButton { compact: true; primary: true; text: @tr("Сохранить пресет"); clicked => { root.save-preset(root.new-preset-name); } }
+                    FluentButton { compact: true; danger: true; text: @tr("Удалить"); clicked => { root.delete-preset(AppState.workspace-selected-preset); } }
+                }
+            }
+        }
+
+        sv-ws := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: sv-ws.visible-width;
+                spacing: 8px;
+
+                for blk in AppState.workspace-blocks : FluentCard {
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 6px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                horizontal-stretch: 1;
+                                text: blk.title + "  (" + blk.span + "/3)";
+                                font-family: Win11Theme.font-ui;
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: Win11Theme.text-primary;
+                                vertical-alignment: center;
+                            }
+                            if (Win11Theme.is-desktop) : HorizontalLayout {
+                                spacing: 3px;
+                                FluentButton { compact: true; primary: blk.span == 1; text: "1/3"; clicked => { root.set-block-span(blk.id, 1); } }
+                                FluentButton { compact: true; primary: blk.span == 2; text: "2/3"; clicked => { root.set-block-span(blk.id, 2); } }
+                                FluentButton { compact: true; primary: blk.span == 3; text: "3/3"; clicked => { root.set-block-span(blk.id, 3); } }
+                            }
+                            FluentButton { compact: true; text: "▲"; clicked => { root.move-block(blk.id, -1); } }
+                            FluentButton { compact: true; text: "▼"; clicked => { root.move-block(blk.id, 1); } }
+                        }
+                        Text {
+                            text: blk.module-id == "torrents"
+                                ? (@tr("Раздач:") + " " + AppState.count-all + " • ↓ " + AppState.telemetry-down-speed)
+                                : (blk.module-id == "search"
+                                    ? (@tr("Результатов поиска:") + " " + AppState.search-results.length)
+                                    : (@tr("История:") + " " + AppState.history-items.length));
+                            font-family: Win11Theme.font-ui;
+                            font-size: 11px;
+                            color: Win11Theme.text-secondary;
+                        }
+                        HorizontalLayout {
+                            FluentButton {
+                                compact: true;
+                                text: @tr("Открыть раздел");
+                                clicked => {
+                                    AppState.active-tab = blk.module-id == "torrents" ? 0 : (blk.module-id == "search" ? 1 : 2);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,87 @@
+import { ScrollView } from "std-widgets.slint";
+import { Win11Theme, PeerItem, SpeedSample } from "../../theme.slint";
+
+export component DetailPeersTab inherits VerticalLayout {
+    in property <[PeerItem]> peers;
+    in property <[SpeedSample]> speed-history;
+
+    vertical-stretch: 1;
+    spacing: 8px;
+
+    // Mini live speed chart
+    Rectangle {
+        height: 68px;
+        border-radius: Win11Theme.radius-ctrl;
+        background: Win11Theme.subtle-bg;
+        border-width: 1px;
+        border-color: Win11Theme.border-color;
+        VerticalLayout {
+            padding: 6px;
+            spacing: 4px;
+            Text {
+                text: @tr("График скорости");
+                font-family: Win11Theme.font-ui;
+                font-size: 10px;
+                font-weight: 600;
+                color: Win11Theme.text-secondary;
+            }
+            HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 3px;
+                alignment: stretch;
+                for bar in root.speed-history : VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: end;
+                    Rectangle {
+                        height: max(3px, 38px * clamp(bar.ratio, 0.0, 1.0));
+                        border-radius: 1.5px;
+                        background: Win11Theme.accent;
+                    }
+                }
+            }
+        }
+    }
+
+    sv-peers := ScrollView {
+        vertical-stretch: 1;
+        VerticalLayout {
+            width: sv-peers.visible-width;
+            spacing: 4px;
+            if (root.peers.length == 0) : Text {
+                text: @tr("Активные пиры не обнаружены или раздача остановлена.");
+                font-family: Win11Theme.font-ui;
+                font-size: 11px;
+                color: Win11Theme.text-secondary;
+                wrap: word-wrap;
+            }
+            for p in root.peers : Rectangle {
+                height: 28px;
+                border-radius: Win11Theme.radius-ctrl;
+                background: Win11Theme.subtle-bg;
+                border-width: 1px;
+                border-color: Win11Theme.border-color;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 6px;
+                    Text {
+                        horizontal-stretch: 1;
+                        text: p.addr + "  " + p.client;
+                        font-family: Win11Theme.font-mono;
+                        font-size: 10px;
+                        color: Win11Theme.text-primary;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: p.progress + " • " + p.speed;
+                        font-family: Win11Theme.font-mono;
+                        font-size: 10px;
+                        color: Win11Theme.accent;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

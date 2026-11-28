@@ -1,0 +1,205 @@
+import { ComboBox, LineEdit, Switch, ScrollView } from "std-widgets.slint";
+import { Win11Theme, ModuleListItem } from "theme.slint";
+import { AppState } from "globals.slint";
+import { FluentButton, SettingsExpander, ThemeSelector, MediaBadge } from "components.slint";
+
+export component CoreSettingsSection inherits VerticalLayout {
+    spacing: 8px;
+
+    in-out property <int> theme-mode: 0;
+    in-out property <int> autostart-mode: 0; // 0=Off, 1=Startup .lnk, 2=HKCU Run
+    in-out property <bool> autostart-needs-repair: false;
+    in-out property <bool> start-minimized: false;
+    in-out property <bool> close-to-tray: true;
+    in-out property <bool> keep-in-memory: true;
+    in property <[ModuleListItem]> registered-modules;
+
+    // WebDAV & SecretStore
+    in-out property <bool> webdav-enabled: false;
+    in-out property <int> webdav-preset: 0; // 0=Yandex, 1=Mail.ru, 2=Custom
+    in-out property <string> webdav-url: "https://webdav.yandex.ru";
+    in-out property <string> webdav-user: "";
+    in-out property <string> webdav-pass: "";
+    in-out property <bool> webdav-sync-db: false;
+    in-out property <int> secret-mode: 0; // 0=DPAPI, 1=MasterPassword
+    in-out property <string> master-password: "";
+
+    // Profiler
+    in-out property <bool> profiler-enabled: false;
+    in property <string> profiler-cpu: "0%";
+    in property <string> profiler-working-set: "0 МБ";
+    in property <string> profiler-private-bytes: "0 МБ";
+    in property <string> profiler-handles: "0";
+    in property <string> profiler-gdi-user: "0 / 0";
+    in property <string> profiler-crash-status: "crash.log отсутствует";
+
+    // About & Updates
+    in property <string> app-version: "0.2.0";
+    in property <string> changelog-text: "";
+    in property <string> update-check-status: "";
+
+    callback change-theme-mode(int);
+    callback change-language(int);
+    callback set-autostart-mode(int);
+    callback repair-autostart();
+    callback toggle-start-minimized(bool);
+    callback toggle-close-to-tray(bool);
+    callback toggle-keep-in-memory(bool);
+    callback save-webdav-settings();
+    callback test-webdav-connection();
+    callback sync-webdav-now();
+    callback toggle-profiler(bool);
+    callback export-profiler-report();
+    callback check-github-updates();
+
+    SettingsExpander {
+        title: @tr("[Ядро] Оформление, язык, автозапуск и трей");
+        subtitle: (root.theme-mode == 0 ? @tr("Системная тема") : (root.theme-mode == 1 ? @tr("Светлая тема") : @tr("Тёмная тема"))) + " • " + AppState.data-dir-path;
+        icon-path: "M 3 3 L 10 3 L 10 10 L 3 10 Z M 14 3 L 21 3 L 21 10 L 14 10 Z M 3 14 L 10 14 L 10 21 L 3 21 Z M 14 14 L 21 14 L 21 21 L 14 21 Z";
+        expanded: true;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 135px; text: @tr("Тема Windows 11:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            ThemeSelector {
+                horizontal-stretch: 1;
+                mode <=> root.theme-mode;
+                changed(m) => { root.change-theme-mode(m); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 135px; text: @tr("Язык интерфейса:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: ["Русский (ru)", "English (en)"];
+                current-index <=> AppState.app-lang;
+                selected => { root.change-language(self.current-index); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 135px; text: @tr("Автозапуск Windows:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: [@tr("Выключен"), @tr("Ярлык Startup (.lnk)"), @tr("Реестр HKCU\\...\\Run")];
+                current-index <=> root.autostart-mode;
+                selected => { root.set-autostart-mode(self.current-index); }
+            }
+            if (root.autostart-needs-repair) : FluentButton {
+                compact: true;
+                primary: true;
+                text: @tr("Исправить");
+                clicked => { root.repair-autostart(); }
+            }
+        }
+
+        Switch { text: @tr("Сворачивать в системный трей при запуске (--minimized)"); checked <=> root.start-minimized; toggled => { root.toggle-start-minimized(self.checked); } }
+        Switch { text: @tr("Сворачивать в трей по кнопке закрытия окна (X)"); checked <=> root.close-to-tray; toggled => { root.toggle-close-to-tray(self.checked); } }
+        Switch { text: @tr("Повышенный приоритет Windows (удержание в памяти)"); checked <=> root.keep-in-memory; toggled => { root.toggle-keep-in-memory(self.checked); } }
+
+        Text {
+            text: @tr("Папка данных:") + " " + AppState.data-dir-path + (AppState.data-read-only ? ("  [" + @tr("ТОЛЬКО ЧТЕНИЕ") + "]") : "");
+            font-family: Win11Theme.font-mono;
+            font-size: 10px;
+            color: AppState.data-read-only ? Win11Theme.status-err : Win11Theme.text-secondary;
+            wrap: word-wrap;
+        }
+    }
+
+    SettingsExpander {
+        title: @tr("[Сервис] Синхронизация WebDAV и SecretStore");
+        subtitle: (root.webdav-enabled ? @tr("Включена") : @tr("Выключена")) + " • " + (root.secret-mode == 0 ? "DPAPI" : "Argon2+ChaCha20");
+        icon-path: "M 6 16 A 4 4 0 0 1 6 8 A 5 5 0 0 1 16 7 A 4 4 0 0 1 18 15 L 6 15";
+
+        Switch { text: @tr("Включить синхронизацию настроек и пресетов через WebDAV"); checked <=> root.webdav-enabled; }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 135px; text: @tr("Провайдер:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: ["Яндекс Диск (webdav.yandex.ru)", "Облако Mail.ru (webdav.cloud.mail.ru)", @tr("Свой WebDAV URL")];
+                current-index <=> root.webdav-preset;
+                selected => {
+                    if (self.current-index == 0) { root.webdav-url = "https://webdav.yandex.ru"; }
+                    else if (self.current-index == 1) { root.webdav-url = "https://webdav.cloud.mail.ru"; }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 135px; text: "URL / Auth:"; font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            LineEdit { horizontal-stretch: 1; text <=> root.webdav-url; placeholder-text: "https://webdav.yandex.ru"; }
+            LineEdit { width: 110px; text <=> root.webdav-user; placeholder-text: @tr("Логин"); }
+            LineEdit { width: 110px; text <=> root.webdav-pass; input-type: InputType.password; placeholder-text: @tr("Пароль"); }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { width: 135px; text: @tr("Хранение секретов:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            ComboBox { horizontal-stretch: 1; model: ["Windows DPAPI (без пароля)", "Мастер-пароль (Argon2 + ChaCha20)"]; current-index <=> root.secret-mode; }
+            if (root.secret-mode == 1) : LineEdit { width: 140px; text <=> root.master-password; input-type: InputType.password; placeholder-text: @tr("Мастер-пароль"); }
+        }
+        Switch { text: @tr("Синхронизировать снапшот БД app_data.db (VACUUM INTO)"); checked <=> root.webdav-sync-db; }
+        HorizontalLayout {
+            spacing: 6px;
+            FluentButton { text: @tr("Сохранить"); primary: true; clicked => { root.save-webdav-settings(); } }
+            FluentButton { text: @tr("Проверить"); clicked => { root.test-webdav-connection(); } }
+            FluentButton { text: @tr("Синхронизировать"); clicked => { root.sync-webdav-now(); } }
+        }
+    }
+
+    SettingsExpander {
+        title: @tr("[Сервис] Профилировщик процесса");
+        subtitle: root.profiler-enabled ? ("CPU " + root.profiler-cpu + " • RAM " + root.profiler-working-set) : @tr("Выключен (по умолчанию)");
+        icon-path: "M 3 12 L 7 12 L 9.5 5 L 14 19 L 16.5 12 L 21 12";
+
+        Switch { text: @tr("Включить сбор метрик процесса (CPU, RAM, Handles, GDI/USER)"); checked <=> root.profiler-enabled; toggled => { root.toggle-profiler(self.checked); } }
+        Text {
+            text: "CPU: " + root.profiler-cpu + "  |  Working Set: " + root.profiler-working-set + "  |  Private: " + root.profiler-private-bytes + "  |  Handles: " + root.profiler-handles + "  |  GDI/USER: " + root.profiler-gdi-user;
+            font-family: Win11Theme.font-mono;
+            font-size: 11px;
+            color: Win11Theme.text-primary;
+            wrap: word-wrap;
+        }
+        Text { text: root.profiler-crash-status; font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; }
+        HorizontalLayout {
+            FluentButton { text: @tr("Экспорт отчёта в UserData/Exports/"); clicked => { root.export-profiler-report(); } }
+        }
+    }
+
+    SettingsExpander {
+        title: @tr("О программе и история версий");
+        subtitle: "TorrServerUI v" + root.app-version + "  •  Made with Slint";
+        icon-path: "M 12 3 A 9 9 0 1 0 12 21 A 9 9 0 1 0 12 3 M 12 11 L 12 16 M 12 8 L 12 8.5";
+
+        HorizontalLayout {
+            spacing: 8px;
+            MediaBadge { text: "Made with Slint"; badge-bg: Win11Theme.info-bg; text-color: Win11Theme.accent; }
+            MediaBadge { text: "MIT + Slint Royalty-Free"; }
+            Rectangle { horizontal-stretch: 1; }
+            FluentButton { compact: true; text: @tr("Проверить обновления"); clicked => { root.check-github-updates(); } }
+        }
+        if (root.update-check-status != "") : Text {
+            text: root.update-check-status;
+            font-family: Win11Theme.font-ui;
+            font-size: 11px;
+            color: Win11Theme.accent;
+            wrap: word-wrap;
+        }
+        Rectangle {
+            height: 150px;
+            border-radius: Win11Theme.radius-ctrl;
+            background: Win11Theme.log-bg;
+            border-width: 1px;
+            border-color: Win11Theme.border-color;
+            clip: true;
+            sv-chg := ScrollView {
+                VerticalLayout {
+                    width: sv-chg.visible-width;
+                    padding: 8px;
+                    Text { text: root.changelog-text; font-family: Win11Theme.font-mono; font-size: 10px; color: Win11Theme.text-primary; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+}

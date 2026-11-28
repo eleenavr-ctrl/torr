@@ -1,7 +1,10 @@
+pub use crate::core::config::{AppConfig, CoreConfig};
+use crate::core::config::{load_settings, save_settings};
+use crate::core::paths::AppPaths;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
 
+/// Backwards-compatible portable paths facade backed by `AppPaths` (`UserData/`).
 #[derive(Debug, Clone)]
 pub struct PortablePaths {
     pub exe_path: PathBuf,
@@ -20,56 +23,30 @@ pub struct PortablePaths {
     pub ts_posters_dir: PathBuf,
     pub ts_webview_dir: PathBuf,
     pub modules_dir: PathBuf,
+    pub app_paths: AppPaths,
 }
 
-impl PortablePaths {
-    pub fn init() -> Result<Self, String> {
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("Не удалось определить путь к exe: {e}"))?;
-        let exe_dir = exe_path
-            .parent()
-            .ok_or_else(|| "Не удалось определить директорию exe".to_string())?
-            .to_path_buf();
-
-        let data_dir = exe_dir.join("data");
-        let torrserver_dir = data_dir.join("torrserver");
-        let ts_cache_dir = torrserver_dir.join("ts_cache");
-        let ts_playlists_dir = torrserver_dir.join("playlists");
-        let ts_torrents_dir = torrserver_dir.join("torrents");
-        let ts_posters_dir = torrserver_dir.join("posters");
-        let modules_dir = data_dir.join("modules");
-
-        for dir in [
-            &data_dir,
-            &torrserver_dir,
-            &ts_cache_dir,
-            &ts_playlists_dir,
-            &ts_torrents_dir,
-            &ts_posters_dir,
-            &modules_dir,
-        ] {
-            fs::create_dir_all(dir)
-                .map_err(|e| format!("Ошибка создания каталога {}: {e}", dir.display()))?;
+impl From<AppPaths> for PortablePaths {
+    fn from(ap: AppPaths) -> Self {
+        Self {
+            exe_path: ap.exe_path.clone(),
+            exe_dir: ap.exe_dir.clone(),
+            data_dir: ap.user_data_dir.clone(),
+            config_path: ap.settings_path.clone(),
+            torrserver_dir: ap.torrserver_dir.clone(),
+            torrserver_exe: ap.torrserver_exe.clone(),
+            ts_cache_dir: ap.ts_cache_dir.clone(),
+            ts_playlists_dir: ap.ts_playlists_dir.clone(),
+            ts_history_path: ap.ts_history_path.clone(),
+            ts_torrents_meta_path: ap.ts_torrents_meta_path.clone(),
+            ts_torrents_links_path: ap.ts_torrents_links_path.clone(),
+            ts_torrents_saved_path: ap.ts_torrents_saved_path.clone(),
+            ts_torrents_dir: ap.ts_torrents_dir.clone(),
+            ts_posters_dir: ap.ts_posters_dir.clone(),
+            ts_webview_dir: ap.ts_webview_dir.clone(),
+            modules_dir: ap.modules_dir.clone(),
+            app_paths: ap,
         }
-
-        Ok(Self {
-            exe_path,
-            exe_dir,
-            config_path: data_dir.join("config.json"),
-            torrserver_exe: torrserver_dir.join("TorrServer-windows-amd64.exe"),
-            ts_history_path: torrserver_dir.join("history.json"),
-            ts_torrents_meta_path: torrserver_dir.join("torrents_meta.json"),
-            ts_torrents_links_path: torrserver_dir.join("torrents_links.json"),
-            ts_torrents_saved_path: torrserver_dir.join("torrents_saved.json"),
-            ts_torrents_dir,
-            ts_posters_dir,
-            ts_webview_dir: torrserver_dir.join("webview2"),
-            data_dir,
-            torrserver_dir,
-            ts_cache_dir,
-            ts_playlists_dir,
-            modules_dir,
-        })
     }
 }
 
@@ -97,26 +74,6 @@ pub struct SavedTorrentTask {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct CoreConfig {
-    pub theme_mode: i32, // 0 = System, 1 = Light, 2 = Dark
-    pub autostart: bool,
-    pub start_minimized: bool,
-    pub keep_in_memory: bool,
-}
-
-impl Default for CoreConfig {
-    fn default() -> Self {
-        Self {
-            theme_mode: 0,
-            autostart: false,
-            start_minimized: false,
-            keep_in_memory: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct TorrServerConfig {
     pub mode: i32, // 0 = Local, 1 = Remote
     pub port: u16,
@@ -126,7 +83,7 @@ pub struct TorrServerConfig {
     pub preferred_engine_tag: String,
     pub engine_watchdog: bool,
     pub keep_engine_on_exit: bool,
-    pub torrents_sort_mode: i32, // 0 = Date desc, 1 = Date asc, 2 = Title, 3 = Size, 4 = Speed
+    pub torrents_sort_mode: i32,
     pub player_id: String,
     pub player_custom_path: String,
     pub player_args: String,
@@ -245,36 +202,10 @@ impl TorrServerConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct AppConfig {
-    pub core: CoreConfig,
-    pub torrserver: TorrServerConfig,
-}
-
 pub fn load_config(paths: &PortablePaths) -> AppConfig {
-    if !paths.config_path.exists() {
-        let cfg = AppConfig::default();
-        let _ = save_config(paths, &cfg);
-        return cfg;
-    }
-
-    match fs::read_to_string(&paths.config_path) {
-        Ok(raw) => serde_json::from_str::<AppConfig>(&raw).unwrap_or_default(),
-        Err(_) => AppConfig::default(),
-    }
+    load_settings(&paths.app_paths).unwrap_or_default()
 }
 
 pub fn save_config(paths: &PortablePaths, config: &AppConfig) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(config)
-        .map_err(|e| format!("Ошибка сериализации config.json: {e}"))?;
-    let tmp_path = paths.config_path.with_extension("json.tmp");
-    fs::write(&tmp_path, json)
-        .map_err(|e| format!("Ошибка записи config.json.tmp: {e}"))?;
-    if paths.config_path.exists() {
-        let _ = fs::remove_file(&paths.config_path);
-    }
-    fs::rename(&tmp_path, &paths.config_path)
-        .map_err(|e| format!("Ошибка сохранения config.json: {e}"))?;
-    Ok(())
+    save_settings(&paths.app_paths, config).map_err(|e| e.to_string())
 }
