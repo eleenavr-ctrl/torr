@@ -29,7 +29,8 @@ export component AppWindow inherits Window {
 
     in property <image> app-icon;
     icon: root.app-icon;
-    Win11Theme.viewport-width: root.width;
+    init => { Win11Theme.viewport-width = root.width; }
+    changed width => { Win11Theme.viewport-width = root.width; }
 
     // Navigation & Shell State
     in-out property <int> active-tab <=> AppState.active-tab;
@@ -380,9 +381,9 @@ export component AppWindow inherits Window {
             if (ev.kind == PointerEventKind.down) { root.swipe-start-x = self.mouse-x; root.swipe-start-y = self.mouse-y; root.swipe-tracking = true; }
             else if (ev.kind == PointerEventKind.up && root.swipe-tracking) {
                 root.swipe-tracking = false;
-                if (self.mouse-x - root.swipe-start-x > 45px && abs(self.mouse-x - root.swipe-start-x) > abs(self.mouse-y - root.swipe-start-y)) {
+                if (self.mouse-x - root.swipe-start-x > 45px && (self.mouse-x - root.swipe-start-x) > (self.mouse-y - root.swipe-start-y) && (self.mouse-x - root.swipe-start-x) > (root.swipe-start-y - self.mouse-y)) {
                     if (AppState.mobile-detail-open) { AppState.mobile-detail-open = false; } else if (Win11Theme.is-mobile) { AppState.mobile-drawer-open = true; }
-                } else if (root.swipe-start-x - self.mouse-x > 45px && abs(self.mouse-x - root.swipe-start-x) > abs(self.mouse-y - root.swipe-start-y)) {
+                } else if (root.swipe-start-x - self.mouse-x > 45px && (root.swipe-start-x - self.mouse-x) > (self.mouse-y - root.swipe-start-y) && (root.swipe-start-x - self.mouse-x) > (root.swipe-start-y - self.mouse-y)) {
                     if (AppState.mobile-drawer-open) { AppState.mobile-drawer-open = false; } else { AppState.mobile-detail-open = true; }
                 }
             }
