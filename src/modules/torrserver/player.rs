@@ -390,7 +390,7 @@ fn find_windows_video_associations() -> Vec<PathBuf> {
     {
         use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
 
-        let mut results = Vec::new();
+        let mut results: Vec<PathBuf> = Vec::new();
         for ext in [".mkv", ".mp4", ".avi", ".m3u"] {
             let mut prog_ids: Vec<String> = Vec::new();
             let uc_key = format!(

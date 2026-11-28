@@ -1649,9 +1649,9 @@ impl AppModule for TorrServerModule {
                     let w_outer = weak.clone();
                     thread::spawn(move || {
                         let cfg = s.ts_config();
-                        let w_cb = w_outer.clone();
+                        let w_cb = Arc::new(Mutex::new(w_outer.clone()));
                         let res = s.rutracker.open_webview_login(&cfg, move |status_msg| {
-                            let w_inner = w_cb.clone();
+                            let Some(w_inner) = w_cb.lock().ok().map(|g| g.clone()) else { return };
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(app) = w_inner.upgrade() {
                                     app.set_rt_auth_status(status_msg.clone().into());
@@ -2161,7 +2161,7 @@ fn play_torrent_m3u(shared: &Arc<TorrServerShared>, hash: &str) {
             let target = m3u_path.to_string_lossy().to_string();
             launch_player(&exe, &target, &cfg.player_args)
         }
-        Err(e) if cfg.player_custom_path.trim().is_empty() => open_with_os_default(&m3u_path),
+        Err(_e) if cfg.player_custom_path.trim().is_empty() => open_with_os_default(&m3u_path),
         Err(e) => Err(e),
     };
 

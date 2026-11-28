@@ -160,13 +160,13 @@ pub fn run() {
     }
 
     let mut tray_handle = {
-        let ui_weak = app.as_weak();
+        let ui_weak = Arc::new(Mutex::new(app.as_weak()));
         let reg_tray = Arc::clone(&registry);
         let vis_tray = Arc::clone(&window_visible);
         TrayHandle::spawn(icon_rgba, move |cmd| match cmd {
             TrayCommand::ToggleWindow | TrayCommand::ShowWindow => {
                 let show_only = cmd == TrayCommand::ShowWindow;
-                let w = ui_weak.clone();
+                let Some(w) = ui_weak.lock().ok().map(|g| g.clone()) else { return };
                 let r = Arc::clone(&reg_tray);
                 let v = Arc::clone(&vis_tray);
                 let _ = slint::invoke_from_event_loop(move || {
