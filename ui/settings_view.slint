@@ -5,7 +5,8 @@ import { FluentButton } from "components.slint";
 import { TorrServerSettingsSection } from "modules/torrserver/settings_section.slint";
 import { CoreSettingsSection } from "settings_core_section.slint";
 
-export component SettingsView inherits ScrollView {
+export component SettingsView inherits Rectangle {
+    background: transparent;
     in-out property <int> ts-mode: 0;
     in-out property <string> ts-port: "8090";
     in-out property <string> ts-remote-url: "http://127.0.0.1:8090";
@@ -105,10 +106,13 @@ export component SettingsView inherits ScrollView {
     callback export-profiler-report();
     callback check-github-updates();
 
-    VerticalLayout {
-        width: root.visible-width;
-        padding: Win11Theme.is-mobile ? 8px : 14px;
-        spacing: 8px;
+    sv-settings := ScrollView {
+        width: parent.width;
+        height: parent.height;
+        VerticalLayout {
+            width: sv-settings.visible-width;
+            padding: Win11Theme.is-mobile ? 8px : 14px;
+            spacing: 8px;
 
         TorrServerSettingsSection {
             ts-mode <=> root.ts-mode; ts-port <=> root.ts-port; ts-remote-url <=> root.ts-remote-url;
@@ -176,9 +180,10 @@ export component SettingsView inherits ScrollView {
             check-github-updates => { root.check-github-updates(); }
         }
 
-        if (!Win11Theme.is-desktop) : FluentButton {
-            text: @tr("Открыть диагностику");
-            clicked => { AppState.mobile-detail-open = true; }
+            if (!Win11Theme.is-desktop) : FluentButton {
+                text: @tr("Открыть диагностику");
+                clicked => { AppState.mobile-detail-open = true; }
+            }
         }
     }
 }

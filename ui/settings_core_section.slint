@@ -60,7 +60,7 @@ export component CoreSettingsSection inherits VerticalLayout {
 
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: @tr("Тема Windows 11:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Тема Windows 11:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             ThemeSelector {
                 horizontal-stretch: 1;
                 mode <=> root.theme-mode;
@@ -69,7 +69,7 @@ export component CoreSettingsSection inherits VerticalLayout {
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: @tr("Язык интерфейса:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Язык интерфейса:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             ComboBox {
                 horizontal-stretch: 1;
                 model: ["Русский (ru)", "English (en)"];
@@ -79,7 +79,7 @@ export component CoreSettingsSection inherits VerticalLayout {
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: @tr("Автозапуск Windows:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Автозапуск Windows:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             ComboBox {
                 horizontal-stretch: 1;
                 model: [@tr("Выключен"), @tr("Ярлык Startup (.lnk)"), @tr("Реестр HKCU\\...\\Run")];
@@ -115,7 +115,7 @@ export component CoreSettingsSection inherits VerticalLayout {
         Switch { text: @tr("Включить синхронизацию настроек и пресетов через WebDAV"); checked <=> root.webdav-enabled; }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: @tr("Провайдер:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Провайдер:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             ComboBox {
                 horizontal-stretch: 1;
                 model: ["Яндекс Диск (webdav.yandex.ru)", "Облако Mail.ru (webdav.cloud.mail.ru)", @tr("Свой WebDAV URL")];
@@ -204,6 +204,8 @@ export component CoreSettingsSection inherits VerticalLayout {
             border-color: Win11Theme.border-color;
             clip: true;
             sv-chg := ScrollView {
+                width: parent.width;
+                height: parent.height;
                 VerticalLayout {
                     width: sv-chg.visible-width;
                     padding: 8px;

@@ -81,7 +81,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
 
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 145px; text: @tr("Режим работы:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 145px; text: @tr("Режим работы:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             ComboBox { horizontal-stretch: 1; model: [@tr("Локальный движок"), @tr("Удалённый сервер")]; current-index <=> root.ts-mode; }
         }
 
@@ -89,7 +89,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
             spacing: 8px;
             HorizontalLayout {
                 spacing: 8px;
-                Text { width: 145px; text: @tr("Порт / Версия:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+                Text { width: Win11Theme.is-mobile ? 96px : 145px; text: @tr("Порт / Версия:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
                 LineEdit { width: 92px; text <=> root.ts-port; placeholder-text: "8090"; }
                 ComboBox { horizontal-stretch: 1; model: root.engine-version-presets; current-index <=> root.engine-version-selected-idx; selected => { root.select-engine-version(self.current-index); } }
                 FluentButton { compact: true; enabled: !root.engine-versions-loading && !root.engine-updating; icon-path: "M 20 11 A 8 8 0 1 0 18 17 M 20 4 L 20 11 L 13 11"; clicked => { root.refresh-engine-versions(); } }
@@ -100,7 +100,7 @@ export component TorrServerSettingsSection inherits VerticalLayout {
 
         if (root.ts-mode == 1) : HorizontalLayout {
             spacing: 8px;
-            Text { width: 145px; text: @tr("URL сервера:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 145px; text: @tr("URL сервера:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.ts-remote-url; placeholder-text: "http://192.168.1.10:8090"; }
         }
 
@@ -119,19 +119,19 @@ export component TorrServerSettingsSection inherits VerticalLayout {
                 }
                 HorizontalLayout {
                     spacing: 8px;
-                    Text { width: 135px; text: @tr("Браузер (ПК):"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; vertical-alignment: center; }
+                    Text { width: Win11Theme.is-mobile ? 90px : 135px; text: @tr("Браузер (ПК):"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; vertical-alignment: center; }
                     Rectangle {
                         horizontal-stretch: 1; height: 28px; border-radius: Win11Theme.radius-ctrl; background: Win11Theme.input-bg; border-width: 1px; border-color: Win11Theme.border-color; clip: true;
-                        HorizontalLayout { padding-left: 8px; padding-right: 8px; TextInput { text: root.ts-browser-url; read-only: true; single-line: true; font-family: Win11Theme.font-mono; font-size: 11px; color: Win11Theme.text-primary; vertical-alignment: center; } }
+                        HorizontalLayout { padding-left: 8px; padding-right: 8px; TextInput { horizontal-stretch: 1; text: root.ts-browser-url; read-only: true; single-line: true; font-family: Win11Theme.font-mono; font-size: 11px; color: Win11Theme.text-primary; vertical-alignment: center; } }
                     }
                     FluentButton { compact: true; text: @tr("Копия"); clicked => { root.copy-ts-browser-url(); } }
                 }
                 HorizontalLayout {
                     spacing: 8px;
-                    Text { width: 135px; text: @tr("Для Lampa (LAN):"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; vertical-alignment: center; }
+                    Text { width: Win11Theme.is-mobile ? 90px : 135px; text: @tr("Для Lampa (LAN):"); font-family: Win11Theme.font-ui; font-size: 11px; color: Win11Theme.text-secondary; vertical-alignment: center; }
                     Rectangle {
                         horizontal-stretch: 1; height: 28px; border-radius: Win11Theme.radius-ctrl; background: Win11Theme.input-bg; border-width: 1px; border-color: root.ts-has-lan-ip ? Win11Theme.border-color : Win11Theme.status-warn; clip: true;
-                        HorizontalLayout { padding-left: 8px; padding-right: 8px; TextInput { text: root.ts-lan-url; read-only: true; single-line: true; font-family: Win11Theme.font-mono; font-size: 11px; color: root.ts-has-lan-ip ? Win11Theme.accent : Win11Theme.text-secondary; vertical-alignment: center; } }
+                        HorizontalLayout { padding-left: 8px; padding-right: 8px; TextInput { horizontal-stretch: 1; text: root.ts-lan-url; read-only: true; single-line: true; font-family: Win11Theme.font-mono; font-size: 11px; color: root.ts-has-lan-ip ? Win11Theme.accent : Win11Theme.text-secondary; vertical-alignment: center; } }
                     }
                     FluentButton { compact: true; text: @tr("Копия"); enabled: root.ts-has-lan-ip; clicked => { root.copy-ts-lan-url(); } }
                 }
@@ -218,24 +218,25 @@ export component TorrServerSettingsSection inherits VerticalLayout {
 
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: @tr("Плеер:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Плеер:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             ComboBox { horizontal-stretch: 1; model: root.player-presets; current-index <=> root.player-selected-idx; }
             FluentButton { compact: true; text: @tr("Найти"); clicked => { root.detect-players(); } }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: @tr("Свой .exe:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Свой .exe:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.player-custom-path; placeholder-text: "C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe"; }
             FluentButton { compact: true; text: @tr("Обзор..."); clicked => { root.pick-player-exe(); } }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { width: 135px; text: @tr("Аргументы CLI:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
+            Text { width: Win11Theme.is-mobile ? 96px : 135px; text: @tr("Аргументы CLI:"); font-family: Win11Theme.font-ui; font-size: 12px; color: Win11Theme.text-primary; vertical-alignment: center; }
             LineEdit { horizontal-stretch: 1; text <=> root.player-args; placeholder-text: "--fullscreen"; }
         }
         Switch { text: @tr("Перехватывать magnet-ссылки из буфера обмена"); checked <=> root.clipboard-watch; }
         HorizontalLayout {
             FluentButton { text: @tr("Сохранить настройки плеера"); primary: true; clicked => { root.save-player-settings(); } }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 

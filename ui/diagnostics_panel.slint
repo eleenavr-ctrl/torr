@@ -91,6 +91,8 @@ export component DiagnosticsPanel inherits FluentCard {
             border-color: Win11Theme.border-color;
             clip: true;
             sv-logs := ScrollView {
+                width: parent.width;
+                height: parent.height;
                 VerticalLayout {
                     width: sv-logs.visible-width;
                     padding: 6px;

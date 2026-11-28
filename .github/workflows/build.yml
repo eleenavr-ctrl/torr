@@ -28,8 +28,18 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Speed up Windows build (exclude workspace from Defender)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
+
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "win-x64-crt-static-v1"
+          cache-on-failure: true
 
       - name: Build single portable Windows .exe
         run: cargo build --release --target x86_64-pc-windows-msvc
